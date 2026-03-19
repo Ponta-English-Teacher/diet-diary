@@ -1,0 +1,2096 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Diet Diary</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Nunito:wght@300;400;600;700;800&display=swap');
+
+  :root {
+    --bg: #f5f0eb;
+    --card: #fffdf9;
+    --primary: #e8805a;
+    --primary-light: #f5b89a;
+    --primary-dark: #c65f38;
+    --accent: #5ab8a8;
+    --accent-light: #a8ddd6;
+    --purple: #9b7ec8;
+    --yellow: #f5c842;
+    --pink: #e87a9b;
+    --text: #2d2318;
+    --text-sub: #7a6a5a;
+    --text-muted: #b0a090;
+    --border: #e8ddd0;
+    --shadow: 0 4px 20px rgba(45,35,24,0.08);
+    --shadow-lg: 0 8px 40px rgba(45,35,24,0.15);
+    --radius: 18px;
+    --radius-sm: 10px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: 'Noto Sans JP', 'Nunito', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ===== HEADER ===== */
+  .app-header {
+    background: var(--card);
+    padding: 16px 20px 12px;
+    box-shadow: var(--shadow);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .app-title {
+    font-family: 'Nunito', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--primary);
+    letter-spacing: -0.5px;
+  }
+
+  .app-title span { color: var(--accent); }
+
+  /* ===== DATE NAV ===== */
+  .date-nav {
+    background: var(--card);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .date-nav-btn {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    color: var(--text-sub);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .date-nav-btn:active { transform: scale(0.9); background: var(--primary); color: white; border-color: var(--primary); }
+
+  .date-display {
+    flex: 1;
+    text-align: center;
+  }
+
+  .date-display input[type="date"] {
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    border: none;
+    background: transparent;
+    text-align: center;
+    width: 100%;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .date-today-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 2px solid var(--primary);
+    background: transparent;
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Noto Sans JP', sans-serif;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .date-today-btn:active { background: var(--primary); color: white; }
+
+  /* ===== VIEW TABS ===== */
+  .view-tabs {
+    display: flex;
+    background: var(--card);
+    padding: 8px 20px;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .view-tab {
+    flex: 1;
+    padding: 8px;
+    border-radius: 10px;
+    border: none;
+    background: var(--bg);
+    color: var(--text-sub);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .view-tab.active {
+    background: var(--primary);
+    color: white;
+  }
+
+  /* ===== MAIN CONTENT ===== */
+  .main-content {
+    padding: 16px 16px 100px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  /* ===== STATUS SUMMARY ===== */
+  .status-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 16px;
+    box-shadow: var(--shadow);
+    margin-bottom: 16px;
+  }
+
+  .status-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .status-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-sub);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .copy-prev-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: none;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Noto Sans JP', sans-serif;
+    transition: all 0.2s;
+  }
+  .copy-prev-btn:active { background: var(--accent); color: white; }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .status-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 4px;
+    border-radius: 10px;
+    background: var(--bg);
+    gap: 3px;
+  }
+
+  .status-item-label {
+    font-size: 11px;
+    color: var(--text-sub);
+    font-weight: 600;
+  }
+
+  .status-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: var(--border);
+    color: var(--text-muted);
+  }
+
+  .status-badge.done {
+    background: #d4f5e9;
+    color: #2a9d6a;
+  }
+
+  /* ===== CATEGORY GRID ===== */
+  .category-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .cat-btn {
+    background: var(--card);
+    border: none;
+    border-radius: var(--radius);
+    padding: 16px 8px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cat-btn:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 8px rgba(45,35,24,0.1);
+  }
+
+  .cat-btn::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    border-radius: 4px 4px 0 0;
+  }
+
+  .cat-btn.weight::before { background: var(--primary); }
+  .cat-btn.meal::before { background: var(--yellow); }
+  .cat-btn.alcohol::before { background: var(--purple); }
+  .cat-btn.exercise::before { background: var(--accent); }
+  .cat-btn.sleep::before { background: #7eb8e8; }
+  .cat-btn.toilet::before { background: #b8d47e; }
+  .cat-btn.water::before { background: #7ed4e8; }
+  .cat-btn.condition::before { background: var(--pink); }
+  .cat-btn.photo::before { background: #e8c27e; }
+  .cat-btn.graph::before { background: var(--accent); }
+  .cat-btn.export::before { background: var(--primary); }
+  .cat-btn.settings::before { background: var(--text-muted); }
+
+  .cat-btn img {
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+    border-radius: 10px;
+  }
+
+  .cat-btn-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    text-align: center;
+  }
+
+  .cat-btn-dot {
+    position: absolute;
+    top: 8px; right: 8px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #2a9d6a;
+  }
+
+  /* ===== WEEK / MONTH VIEWS ===== */
+  .view-section {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 18px;
+    box-shadow: var(--shadow);
+    margin-bottom: 16px;
+  }
+
+  .view-section h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--bg);
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--bg);
+    font-size: 13px;
+  }
+
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: var(--text-sub); }
+  .stat-value { font-weight: 700; color: var(--text); }
+
+  .chart-container {
+    position: relative;
+    height: 200px;
+    margin-top: 12px;
+  }
+
+  /* ===== MODAL ===== */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(45,35,24,0.5);
+    z-index: 1000;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--card);
+    border-radius: 24px 24px 0 0;
+    width: 100%;
+    max-width: 480px;
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 24px 20px 40px;
+    animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .modal-handle {
+    width: 40px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 0 auto 20px;
+  }
+
+  .modal-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .modal-title img {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    object-fit: contain;
+  }
+
+  .form-group {
+    margin-bottom: 18px;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-sub);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--bg);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .form-input:focus { border-color: var(--primary); }
+
+  .tag-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .tag-btn {
+    padding: 7px 14px;
+    border-radius: 20px;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    color: var(--text-sub);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .tag-btn.selected {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: white;
+  }
+
+  .option-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .option-btn {
+    flex: 1;
+    min-width: 60px;
+    padding: 10px 8px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border);
+    background: var(--bg);
+    color: var(--text-sub);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+
+  .option-btn.selected {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: white;
+  }
+
+  .section-divider {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 16px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--accent-light);
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 24px;
+  }
+
+  .btn-save {
+    flex: 2;
+    padding: 14px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: var(--primary);
+    color: white;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-save:active { background: var(--primary-dark); transform: scale(0.98); }
+
+  .btn-cancel {
+    flex: 1;
+    padding: 14px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border);
+    background: transparent;
+    color: var(--text-sub);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* ===== GRAPH MODAL ===== */
+  .graph-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .graph-tab {
+    flex: 1;
+    padding: 8px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    color: var(--text-sub);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .graph-tab.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: white;
+  }
+
+  .graph-modal-chart {
+    position: relative;
+    height: 240px;
+  }
+
+  /* ===== EXPORT MODAL ===== */
+  .export-textarea {
+    width: 100%;
+    height: 240px;
+    padding: 14px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--bg);
+    resize: none;
+    line-height: 1.6;
+  }
+
+  .btn-copy {
+    width: 100%;
+    padding: 14px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: all 0.2s;
+  }
+  .btn-copy:active { background: #3fa090; }
+
+  .export-type-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .export-tab {
+    flex: 1;
+    padding: 8px 4px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    color: var(--text-sub);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .export-tab.active {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: white;
+  }
+
+  /* ===== SETTINGS ===== */
+  .settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--bg);
+  }
+
+  .settings-row:last-child { border-bottom: none; }
+
+  .settings-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .settings-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .settings-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    color: var(--text-sub);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .settings-btn.danger {
+    border-color: #e84040;
+    color: #e84040;
+  }
+
+  .settings-btn.danger:active { background: #e84040; color: white; }
+
+  /* ===== TOAST ===== */
+  .toast {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--text);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 40px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: 'Noto Sans JP', sans-serif;
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 9999;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* ===== PHOTO SECTION ===== */
+  .photo-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .photo-thumb {
+    width: 72px;
+    height: 72px;
+    border-radius: 10px;
+    object-fit: cover;
+    border: 2px solid var(--border);
+    position: relative;
+  }
+
+  .photo-thumb-wrap {
+    position: relative;
+    display: inline-block;
+  }
+
+  .photo-del-btn {
+    position: absolute;
+    top: -6px; right: -6px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #e84040;
+    color: white;
+    border: none;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+  }
+
+  .photo-add-btn {
+    width: 72px; height: 72px;
+    border-radius: 10px;
+    border: 2px dashed var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* meal tabs */
+  .meal-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .meal-tab {
+    flex: 1;
+    padding: 8px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    color: var(--text-sub);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .meal-tab.active {
+    border-color: var(--yellow);
+    background: var(--yellow);
+    color: var(--text);
+  }
+
+  .meal-panel { display: none; }
+  .meal-panel.active { display: block; }
+
+  /* view panels */
+  .view-panel { display: none; }
+  .view-panel.active { display: block; }
+
+  /* empty state */
+  .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  .empty-state-icon { font-size: 48px; margin-bottom: 10px; }
+
+  /* weight display in summary */
+  .weight-display {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--primary);
+    text-align: center;
+    padding: 10px;
+  }
+  .weight-display span {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-sub);
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="app-header">
+  <div class="app-title">Diet <span>Diary</span></div>
+</div>
+
+<!-- DATE NAV -->
+<div class="date-nav">
+  <button class="date-nav-btn" onclick="changeDate(-1)">‹</button>
+  <div class="date-display">
+    <input type="date" id="dateInput" onchange="onDateChange()">
+  </div>
+  <button class="date-today-btn" onclick="goToday()">今日</button>
+  <button class="date-nav-btn" onclick="changeDate(1)">›</button>
+</div>
+
+<!-- VIEW TABS -->
+<div class="view-tabs">
+  <button class="view-tab active" onclick="switchView('day', this)">日</button>
+  <button class="view-tab" onclick="switchView('week', this)">週</button>
+  <button class="view-tab" onclick="switchView('month', this)">月</button>
+</div>
+
+<!-- MAIN -->
+<div class="main-content">
+
+  <!-- DAY VIEW -->
+  <div class="view-panel active" id="viewDay">
+
+    <!-- Status Summary -->
+    <div class="status-card">
+      <div class="status-header">
+        <div class="status-title">本日の記録</div>
+        <button class="copy-prev-btn" onclick="copyPrevDay()">前日コピー</button>
+      </div>
+      <div id="weightSummaryDisplay" style="display:none" class="weight-display">
+        <span id="weightMornDisplay">--</span>kg <span>朝</span>
+      </div>
+      <div class="status-grid" id="statusGrid"></div>
+    </div>
+
+    <!-- Category Grid -->
+    <div class="category-grid">
+      <button class="cat-btn weight" onclick="openModal('weight')">
+        <img src="images/image_1.jpg" alt="体重" onerror="this.style.display='none'">
+        <div class="cat-btn-label">体重</div>
+        <div class="cat-btn-dot" id="dot-weight" style="display:none"></div>
+      </button>
+      <button class="cat-btn meal" onclick="openModal('meal')">
+        <img src="images/image_2.jpg" alt="食事" onerror="this.style.display='none'">
+        <div class="cat-btn-label">食事</div>
+        <div class="cat-btn-dot" id="dot-meal" style="display:none"></div>
+      </button>
+      <button class="cat-btn alcohol" onclick="openModal('alcohol')">
+        <img src="images/image_3.jpg" alt="飲酒" onerror="this.style.display='none'">
+        <div class="cat-btn-label">飲酒</div>
+        <div class="cat-btn-dot" id="dot-alcohol" style="display:none"></div>
+      </button>
+      <button class="cat-btn exercise" onclick="openModal('exercise')">
+        <img src="images/image_4.jpg" alt="運動" onerror="this.style.display='none'">
+        <div class="cat-btn-label">運動</div>
+        <div class="cat-btn-dot" id="dot-exercise" style="display:none"></div>
+      </button>
+      <button class="cat-btn sleep" onclick="openModal('sleep')">
+        <img src="images/image_5.jpg" alt="睡眠" onerror="this.style.display='none'">
+        <div class="cat-btn-label">睡眠</div>
+        <div class="cat-btn-dot" id="dot-sleep" style="display:none"></div>
+      </button>
+      <button class="cat-btn toilet" onclick="openModal('toilet')">
+        <img src="images/image_6.jpg" alt="トイレ" onerror="this.style.display='none'">
+        <div class="cat-btn-label">トイレ</div>
+        <div class="cat-btn-dot" id="dot-toilet" style="display:none"></div>
+      </button>
+      <button class="cat-btn water" onclick="openModal('water')">
+        <img src="images/image_7.jpg" alt="水分" onerror="this.style.display='none'">
+        <div class="cat-btn-label">水分</div>
+        <div class="cat-btn-dot" id="dot-water" style="display:none"></div>
+      </button>
+      <button class="cat-btn condition" onclick="openModal('condition')">
+        <img src="images/image_8.jpg" alt="体調" onerror="this.style.display='none'">
+        <div class="cat-btn-label">体調</div>
+        <div class="cat-btn-dot" id="dot-condition" style="display:none"></div>
+      </button>
+      <button class="cat-btn photo" onclick="openModal('photo')">
+        <img src="images/image_9.jpg" alt="写真" onerror="this.style.display='none'">
+        <div class="cat-btn-label">写真</div>
+        <div class="cat-btn-dot" id="dot-photo" style="display:none"></div>
+      </button>
+      <button class="cat-btn graph" onclick="openModal('graph')">
+        <img src="images/image_10.jpg" alt="グラフ" onerror="this.style.display='none'">
+        <div class="cat-btn-label">グラフ</div>
+      </button>
+      <button class="cat-btn export" onclick="openModal('export')">
+        <img src="images/image_11.jpg" alt="出力" onerror="this.style.display='none'">
+        <div class="cat-btn-label">出力</div>
+      </button>
+      <button class="cat-btn settings" onclick="openModal('settings')">
+        <img src="images/image_12.jpg" alt="設定" onerror="this.style.display='none'">
+        <div class="cat-btn-label">設定</div>
+      </button>
+    </div>
+
+  </div><!-- end day view -->
+
+  <!-- WEEK VIEW -->
+  <div class="view-panel" id="viewWeek">
+    <div class="view-section">
+      <h3>📅 今週のサマリー</h3>
+      <div id="weekStats"></div>
+    </div>
+    <div class="view-section">
+      <h3>📈 今週の体重推移</h3>
+      <div class="chart-container">
+        <canvas id="weekChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- MONTH VIEW -->
+  <div class="view-panel" id="viewMonth">
+    <div class="view-section">
+      <h3>📆 今月のサマリー</h3>
+      <div id="monthStats"></div>
+    </div>
+    <div class="view-section">
+      <h3>📈 今月の体重推移</h3>
+      <div class="chart-container">
+        <canvas id="monthChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end main -->
+
+<!-- ======================== MODALS ======================== -->
+
+<!-- WEIGHT MODAL -->
+<div class="modal-overlay" id="modal-weight">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_1.jpg" onerror="this.style.display='none'"> 体重
+    </div>
+    <div class="form-group">
+      <label class="form-label">朝の体重 (kg)</label>
+      <input type="number" class="form-input" id="weightMorn" step="0.1" placeholder="例: 82.4">
+    </div>
+    <div class="form-group">
+      <label class="form-label">夜の体重 (kg)（任意）</label>
+      <input type="number" class="form-input" id="weightEve" step="0.1" placeholder="例: 82.9">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('weight')">閉じる</button>
+      <button class="btn-save" onclick="saveWeight()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- MEAL MODAL -->
+<div class="modal-overlay" id="modal-meal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_2.jpg" onerror="this.style.display='none'"> 食事
+    </div>
+    <div class="meal-tabs">
+      <button class="meal-tab active" onclick="switchMealTab('breakfast', this)">朝食</button>
+      <button class="meal-tab" onclick="switchMealTab('lunch', this)">昼食</button>
+      <button class="meal-tab" onclick="switchMealTab('dinner', this)">夕食</button>
+    </div>
+    <!-- Breakfast -->
+    <div class="meal-panel active" id="mealPanel-breakfast">
+      <div class="form-group">
+        <label class="form-label">食べたもの</label>
+        <div class="tag-group" id="mealTags-breakfast"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">量</label>
+        <div class="option-group" id="mealAmount-breakfast">
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-breakfast','少')">少</button>
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-breakfast','普通')">普通</button>
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-breakfast','多')">多</button>
+        </div>
+        <input type="hidden" id="mealAmountVal-breakfast">
+      </div>
+      <div class="form-group">
+        <label class="form-label">メモ</label>
+        <input type="text" class="form-input" id="mealNote-breakfast" placeholder="メモを入力">
+      </div>
+    </div>
+    <!-- Lunch -->
+    <div class="meal-panel" id="mealPanel-lunch">
+      <div class="form-group">
+        <label class="form-label">食べたもの</label>
+        <div class="tag-group" id="mealTags-lunch"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">量</label>
+        <div class="option-group" id="mealAmount-lunch">
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-lunch','少')">少</button>
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-lunch','普通')">普通</button>
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-lunch','多')">多</button>
+        </div>
+        <input type="hidden" id="mealAmountVal-lunch">
+      </div>
+      <div class="form-group">
+        <label class="form-label">メモ</label>
+        <input type="text" class="form-input" id="mealNote-lunch" placeholder="メモを入力">
+      </div>
+    </div>
+    <!-- Dinner -->
+    <div class="meal-panel" id="mealPanel-dinner">
+      <div class="form-group">
+        <label class="form-label">食べたもの</label>
+        <div class="tag-group" id="mealTags-dinner"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">量</label>
+        <div class="option-group" id="mealAmount-dinner">
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-dinner','少')">少</button>
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-dinner','普通')">普通</button>
+          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-dinner','多')">多</button>
+        </div>
+        <input type="hidden" id="mealAmountVal-dinner">
+      </div>
+      <div class="form-group">
+        <label class="form-label">メモ</label>
+        <input type="text" class="form-input" id="mealNote-dinner" placeholder="メモを入力">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('meal')">閉じる</button>
+      <button class="btn-save" onclick="saveMeal()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ALCOHOL MODAL -->
+<div class="modal-overlay" id="modal-alcohol">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_3.jpg" onerror="this.style.display='none'"> 飲酒
+    </div>
+    <div class="form-group">
+      <label class="form-label">飲んだ？</label>
+      <div class="option-group">
+        <button class="option-btn" id="alcNoneBtn" onclick="selectAlcohol('none')">なし</button>
+        <button class="option-btn" id="alcYesBtn" onclick="selectAlcohol('yes')">あり</button>
+      </div>
+    </div>
+    <div id="alcDetails" style="display:none">
+      <div class="form-group">
+        <label class="form-label">種類（複数選択可）</label>
+        <div class="tag-group">
+          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">ビール</button>
+          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">ハイボール</button>
+          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">焼酎</button>
+          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">ワイン</button>
+          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">ウイスキー</button>
+          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">カクテル</button>
+          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">その他</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">杯数</label>
+        <div class="option-group">
+          <button class="option-btn" onclick="selectOption(this,'alcCupsVal','1')">1杯</button>
+          <button class="option-btn" onclick="selectOption(this,'alcCupsVal','2')">2杯</button>
+          <button class="option-btn" onclick="selectOption(this,'alcCupsVal','3')">3杯</button>
+          <button class="option-btn" onclick="selectOption(this,'alcCupsVal','4+')">4杯以上</button>
+        </div>
+        <input type="hidden" id="alcCupsVal">
+      </div>
+      <div class="form-group">
+        <label class="form-label">場所</label>
+        <div class="option-group">
+          <button class="option-btn" onclick="selectOption(this,'alcPlaceVal','外飲み')">外飲み</button>
+          <button class="option-btn" onclick="selectOption(this,'alcPlaceVal','家')">家</button>
+          <button class="option-btn" onclick="selectOption(this,'alcPlaceVal','両方')">両方</button>
+        </div>
+        <input type="hidden" id="alcPlaceVal">
+      </div>
+      <div class="form-group">
+        <label class="form-label">メモ</label>
+        <input type="text" class="form-input" id="alcNote" placeholder="メモを入力">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('alcohol')">閉じる</button>
+      <button class="btn-save" onclick="saveAlcohol()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXERCISE MODAL -->
+<div class="modal-overlay" id="modal-exercise">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_4.jpg" onerror="this.style.display='none'"> 運動
+    </div>
+    <div class="form-group">
+      <label class="form-label">種類</label>
+      <div class="tag-group">
+        <button class="tag-btn" onclick="toggleTag(this, 'exTypes')">ウォーキング</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'exTypes')">ヨガ</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'exTypes')">ストレッチ</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'exTypes')">筋トレ</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'exTypes')">なし</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'exTypes')">その他</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">時間（分）</label>
+      <div class="option-group">
+        <button class="option-btn" onclick="selectOption(this,'exDurVal','10')">10分</button>
+        <button class="option-btn" onclick="selectOption(this,'exDurVal','20')">20分</button>
+        <button class="option-btn" onclick="selectOption(this,'exDurVal','30')">30分</button>
+        <button class="option-btn" onclick="selectOption(this,'exDurVal','45')">45分</button>
+        <button class="option-btn" onclick="selectOption(this,'exDurVal','60+')">60分以上</button>
+      </div>
+      <input type="hidden" id="exDurVal">
+    </div>
+    <div class="form-group">
+      <label class="form-label">メモ</label>
+      <input type="text" class="form-input" id="exNote" placeholder="メモを入力">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('exercise')">閉じる</button>
+      <button class="btn-save" onclick="saveExercise()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- SLEEP MODAL -->
+<div class="modal-overlay" id="modal-sleep">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_5.jpg" onerror="this.style.display='none'"> 睡眠
+    </div>
+    <div class="form-group">
+      <label class="form-label">就寝時刻</label>
+      <input type="time" class="form-input" id="sleepBed">
+    </div>
+    <div class="form-group">
+      <label class="form-label">起床時刻</label>
+      <input type="time" class="form-input" id="sleepWake">
+    </div>
+    <div class="form-group">
+      <label class="form-label">睡眠時間（メモ）</label>
+      <input type="text" class="form-input" id="sleepHours" placeholder="例: 6.5時間">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('sleep')">閉じる</button>
+      <button class="btn-save" onclick="saveSleep()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOILET MODAL -->
+<div class="modal-overlay" id="modal-toilet">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_6.jpg" onerror="this.style.display='none'"> トイレ
+    </div>
+    <div class="form-group">
+      <label class="form-label">排便回数</label>
+      <div class="option-group">
+        <button class="option-btn" onclick="selectOption(this,'toiletBowelCount','なし')">なし</button>
+        <button class="option-btn" onclick="selectOption(this,'toiletBowelCount','1回')">1回</button>
+        <button class="option-btn" onclick="selectOption(this,'toiletBowelCount','2回')">2回</button>
+        <button class="option-btn" onclick="selectOption(this,'toiletBowelCount','3回以上')">3回以上</button>
+      </div>
+      <input type="hidden" id="toiletBowelCount">
+    </div>
+    <div class="form-group">
+      <label class="form-label">状態</label>
+      <div class="option-group">
+        <button class="option-btn" onclick="selectOption(this,'toiletBowelCond','硬め')">硬め</button>
+        <button class="option-btn" onclick="selectOption(this,'toiletBowelCond','普通')">普通</button>
+        <button class="option-btn" onclick="selectOption(this,'toiletBowelCond','やや軟')">やや軟</button>
+        <button class="option-btn" onclick="selectOption(this,'toiletBowelCond','軟便')">軟便</button>
+      </div>
+      <input type="hidden" id="toiletBowelCond">
+    </div>
+    <div class="form-group">
+      <label class="form-label">排尿</label>
+      <div class="option-group">
+        <button class="option-btn" onclick="selectOption(this,'toiletUrine','少ない')">少ない</button>
+        <button class="option-btn" onclick="selectOption(this,'toiletUrine','普通')">普通</button>
+        <button class="option-btn" onclick="selectOption(this,'toiletUrine','多い')">多い</button>
+      </div>
+      <input type="hidden" id="toiletUrine">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('toilet')">閉じる</button>
+      <button class="btn-save" onclick="saveToilet()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- WATER MODAL -->
+<div class="modal-overlay" id="modal-water">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_7.jpg" onerror="this.style.display='none'"> 水分
+    </div>
+    <div class="form-group">
+      <label class="form-label">今日の水分摂取量</label>
+      <div class="option-group">
+        <button class="option-btn" onclick="selectOption(this,'waterIntake','1L未満')">1L未満</button>
+        <button class="option-btn" onclick="selectOption(this,'waterIntake','1〜1.5L')">1〜1.5L</button>
+        <button class="option-btn" onclick="selectOption(this,'waterIntake','1.5〜2L')">1.5〜2L</button>
+        <button class="option-btn" onclick="selectOption(this,'waterIntake','2L以上')">2L以上</button>
+      </div>
+      <input type="hidden" id="waterIntake">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('water')">閉じる</button>
+      <button class="btn-save" onclick="saveWater()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONDITION MODAL -->
+<div class="modal-overlay" id="modal-condition">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_8.jpg" onerror="this.style.display='none'"> 体調
+    </div>
+    <div class="form-group">
+      <label class="form-label">今日の状態（複数選択可）</label>
+      <div class="tag-group">
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">空腹感あり</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">満足</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">食後眠い</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">ストレスあり</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">食べすぎた</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">飲みすぎた</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">体調良い</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">体調不良</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">むくみあり</button>
+        <button class="tag-btn" onclick="toggleTag(this, 'condTags')">疲れ気味</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">メモ</label>
+      <input type="text" class="form-input" id="condMemo" placeholder="今日の体調メモ">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('condition')">閉じる</button>
+      <button class="btn-save" onclick="saveCondition()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- PHOTO MODAL -->
+<div class="modal-overlay" id="modal-photo">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_9.jpg" onerror="this.style.display='none'"> 写真
+    </div>
+    <div class="form-group">
+      <label class="form-label">写真を追加（最大5枚）</label>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">※ローカルに保存されます（容量に注意）</p>
+      <div class="photo-preview" id="photoPreview"></div>
+      <input type="file" accept="image/*" id="photoInput" style="display:none" onchange="addPhoto(event)" multiple>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('photo')">閉じる</button>
+      <button class="btn-save" onclick="savePhoto()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- GRAPH MODAL -->
+<div class="modal-overlay" id="modal-graph">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_10.jpg" onerror="this.style.display='none'"> グラフ
+    </div>
+    <div class="graph-tabs">
+      <button class="graph-tab active" onclick="switchGraphTab('7', this)">直近7日</button>
+      <button class="graph-tab" onclick="switchGraphTab('30', this)">直近30日</button>
+      <button class="graph-tab" onclick="switchGraphTab('all', this)">全期間</button>
+    </div>
+    <div class="graph-modal-chart">
+      <canvas id="graphModalChart"></canvas>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin-top:8px;text-align:center">朝体重を使用（なければ夜体重）</p>
+    <div class="modal-actions">
+      <button class="btn-save" onclick="closeModal('graph')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXPORT MODAL -->
+<div class="modal-overlay" id="modal-export">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_11.jpg" onerror="this.style.display='none'"> 出力
+    </div>
+    <div class="export-type-tabs">
+      <button class="export-tab active" onclick="switchExportTab('day', this)">今日</button>
+      <button class="export-tab" onclick="switchExportTab('week', this)">今週</button>
+      <button class="export-tab" onclick="switchExportTab('month', this)">今月</button>
+    </div>
+    <textarea class="export-textarea" id="exportText" readonly></textarea>
+    <button class="btn-copy" onclick="copyExportText()">📋 クリップボードにコピー</button>
+    <div class="modal-actions">
+      <button class="btn-save" onclick="closeModal('export')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="modal-settings">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      <img src="images/image_12.jpg" onerror="this.style.display='none'"> 設定
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">JSONバックアップ書き出し</div>
+        <div class="settings-sub">データをJSONファイルとして保存</div>
+      </div>
+      <button class="settings-btn" onclick="exportJSON()">書き出し</button>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">JSONバックアップ読み込み</div>
+        <div class="settings-sub">保存したJSONからデータを復元</div>
+      </div>
+      <button class="settings-btn" onclick="document.getElementById('importFile').click()">読み込み</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">全データ削除</div>
+        <div class="settings-sub">すべての記録を削除します</div>
+      </div>
+      <button class="settings-btn danger" onclick="clearAllData()">削除</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-save" onclick="closeModal('settings')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ===================== STATE =====================
+const FOOD_TAGS = ['オートミール','豆乳','卵','バナナ','ヨーグルト','パン','ご飯','麺','カレー','魚','肉','野菜','弁当','コンビニ食','その他'];
+const STORAGE_KEY = 'dietDiaryData';
+
+let currentDate = todayStr();
+let data = loadData();
+let currentGraphDays = '7';
+let currentExportTab = 'day';
+let graphModalChart = null;
+let weekChartInst = null;
+let monthChartInst = null;
+let tempPhotos = [];
+
+// ===================== DATE UTILS =====================
+function todayStr() {
+  const d = new Date();
+  return d.toISOString().slice(0,10);
+}
+
+function formatDate(str) {
+  const d = new Date(str + 'T00:00:00');
+  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+}
+
+// ===================== DATA =====================
+function loadData() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; }
+}
+
+function saveData() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function getRecord(dateStr) {
+  if (!data[dateStr]) {
+    data[dateStr] = {
+      date: dateStr,
+      weight: { morning: '', evening: '' },
+      meals: {
+        breakfast: { items: [], amount: '', note: '' },
+        lunch: { items: [], amount: '', note: '' },
+        dinner: { items: [], amount: '', note: '' }
+      },
+      alcohol: { hasAlcohol: null, types: [], cups: '', place: '', note: '' },
+      sleep: { bedTime: '', wakeTime: '', hours: '' },
+      toilet: { bowelCount: '', bowelCondition: '', urination: '' },
+      water: { intake: '' },
+      exercise: { types: [], duration: '', note: '' },
+      condition: { tags: [], memo: '' },
+      photos: [],
+      updatedAt: ''
+    };
+  }
+  return data[dateStr];
+}
+
+// ===================== INIT =====================
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('dateInput').value = currentDate;
+  buildMealTags();
+  renderDay();
+});
+
+function buildMealTags() {
+  ['breakfast','lunch','dinner'].forEach(meal => {
+    const el = document.getElementById(`mealTags-${meal}`);
+    el.innerHTML = '';
+    FOOD_TAGS.forEach(tag => {
+      const btn = document.createElement('button');
+      btn.className = 'tag-btn';
+      btn.textContent = tag;
+      btn.setAttribute('data-group', `mealItems-${meal}`);
+      btn.onclick = () => btn.classList.toggle('selected');
+      el.appendChild(btn);
+    });
+  });
+}
+
+// ===================== DATE NAV =====================
+function changeDate(delta) {
+  const d = new Date(currentDate + 'T00:00:00');
+  d.setDate(d.getDate() + delta);
+  currentDate = d.toISOString().slice(0,10);
+  document.getElementById('dateInput').value = currentDate;
+  renderDay();
+}
+
+function onDateChange() {
+  currentDate = document.getElementById('dateInput').value;
+  renderDay();
+}
+
+function goToday() {
+  currentDate = todayStr();
+  document.getElementById('dateInput').value = currentDate;
+  renderDay();
+}
+
+// ===================== VIEW SWITCH =====================
+function switchView(view, btn) {
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`view${view.charAt(0).toUpperCase()+view.slice(1)}`).classList.add('active');
+  if (view === 'week') renderWeekView();
+  if (view === 'month') renderMonthView();
+}
+
+// ===================== RENDER DAY =====================
+function renderDay() {
+  const rec = getRecord(currentDate);
+  renderStatusGrid(rec);
+  updateDots(rec);
+  // weight display
+  const wd = document.getElementById('weightSummaryDisplay');
+  if (rec.weight.morning) {
+    wd.style.display = 'block';
+    document.getElementById('weightMornDisplay').textContent = rec.weight.morning;
+  } else {
+    wd.style.display = 'none';
+  }
+}
+
+function renderStatusGrid(rec) {
+  const items = [
+    { label: '体重', done: !!(rec.weight.morning || rec.weight.evening) },
+    { label: '食事', done: !!(hasMeal(rec)) },
+    { label: '飲酒', done: rec.alcohol.hasAlcohol !== null },
+    { label: '運動', done: !!(rec.exercise.types && rec.exercise.types.length) },
+    { label: '睡眠', done: !!(rec.sleep.bedTime || rec.sleep.wakeTime) },
+    { label: 'トイレ', done: !!(rec.toilet.bowelCount) },
+    { label: '水分', done: !!(rec.water.intake) },
+    { label: '体調', done: !!(rec.condition.tags.length || rec.condition.memo) },
+    { label: '写真', done: rec.photos.length > 0 },
+  ];
+  const grid = document.getElementById('statusGrid');
+  grid.innerHTML = items.map(i => `
+    <div class="status-item">
+      <div class="status-item-label">${i.label}</div>
+      <div class="status-badge ${i.done?'done':''}">${i.done?'✓ 記入済':'未入力'}</div>
+    </div>
+  `).join('');
+}
+
+function hasMeal(rec) {
+  return ['breakfast','lunch','dinner'].some(m =>
+    rec.meals[m].items.length || rec.meals[m].note
+  );
+}
+
+function updateDots(rec) {
+  const map = {
+    'weight': !!(rec.weight.morning || rec.weight.evening),
+    'meal': hasMeal(rec),
+    'alcohol': rec.alcohol.hasAlcohol !== null,
+    'exercise': !!(rec.exercise.types && rec.exercise.types.length),
+    'sleep': !!(rec.sleep.bedTime || rec.sleep.wakeTime),
+    'toilet': !!(rec.toilet.bowelCount),
+    'water': !!(rec.water.intake),
+    'condition': !!(rec.condition.tags.length || rec.condition.memo),
+    'photo': rec.photos.length > 0,
+  };
+  Object.entries(map).forEach(([k, v]) => {
+    const dot = document.getElementById(`dot-${k}`);
+    if (dot) dot.style.display = v ? 'block' : 'none';
+  });
+}
+
+// ===================== MODALS =====================
+function openModal(type) {
+  const rec = getRecord(currentDate);
+
+  if (type === 'weight') {
+    document.getElementById('weightMorn').value = rec.weight.morning || '';
+    document.getElementById('weightEve').value = rec.weight.evening || '';
+  }
+  if (type === 'meal') {
+    ['breakfast','lunch','dinner'].forEach(meal => {
+      // restore tags
+      document.querySelectorAll(`#mealTags-${meal} .tag-btn`).forEach(btn => {
+        btn.classList.toggle('selected', rec.meals[meal].items.includes(btn.textContent));
+      });
+      // restore amount
+      restoreOption(`mealAmount-${meal}`, `mealAmountVal-${meal}`, rec.meals[meal].amount);
+      document.getElementById(`mealNote-${meal}`).value = rec.meals[meal].note || '';
+    });
+  }
+  if (type === 'alcohol') {
+    const a = rec.alcohol;
+    document.getElementById('alcNoneBtn').classList.toggle('selected', a.hasAlcohol === false);
+    document.getElementById('alcYesBtn').classList.toggle('selected', a.hasAlcohol === true);
+    document.getElementById('alcDetails').style.display = a.hasAlcohol ? 'block' : 'none';
+    document.querySelectorAll('#modal-alcohol .tag-btn').forEach(btn => {
+      btn.classList.toggle('selected', (a.types||[]).includes(btn.textContent));
+    });
+    restoreOption('modal-alcohol', 'alcCupsVal', a.cups);
+    restoreOption('modal-alcohol', 'alcPlaceVal', a.place);
+    document.getElementById('alcNote').value = a.note || '';
+  }
+  if (type === 'exercise') {
+    document.querySelectorAll('#modal-exercise .tag-btn').forEach(btn => {
+      btn.classList.toggle('selected', (rec.exercise.types||[]).includes(btn.textContent));
+    });
+    restoreOption('modal-exercise', 'exDurVal', rec.exercise.duration);
+    document.getElementById('exNote').value = rec.exercise.note || '';
+  }
+  if (type === 'sleep') {
+    document.getElementById('sleepBed').value = rec.sleep.bedTime || '';
+    document.getElementById('sleepWake').value = rec.sleep.wakeTime || '';
+    document.getElementById('sleepHours').value = rec.sleep.hours || '';
+  }
+  if (type === 'toilet') {
+    restoreOption('modal-toilet', 'toiletBowelCount', rec.toilet.bowelCount);
+    restoreOption('modal-toilet', 'toiletBowelCond', rec.toilet.bowelCondition);
+    restoreOption('modal-toilet', 'toiletUrine', rec.toilet.urination);
+  }
+  if (type === 'water') {
+    restoreOption('modal-water', 'waterIntake', rec.water.intake);
+  }
+  if (type === 'condition') {
+    document.querySelectorAll('#modal-condition .tag-btn').forEach(btn => {
+      btn.classList.toggle('selected', rec.condition.tags.includes(btn.textContent));
+    });
+    document.getElementById('condMemo').value = rec.condition.memo || '';
+  }
+  if (type === 'photo') {
+    tempPhotos = [...(rec.photos||[])];
+    renderPhotoPreview();
+  }
+  if (type === 'graph') {
+    currentGraphDays = '7';
+    document.querySelectorAll('.graph-tab').forEach((t,i) => t.classList.toggle('active', i===0));
+    setTimeout(() => renderGraphModal(), 100);
+  }
+  if (type === 'export') {
+    currentExportTab = 'day';
+    document.querySelectorAll('.export-tab').forEach((t,i) => t.classList.toggle('active', i===0));
+    renderExport();
+  }
+
+  document.getElementById(`modal-${type}`).classList.add('open');
+}
+
+function closeModal(type) {
+  document.getElementById(`modal-${type}`).classList.remove('open');
+}
+
+// click overlay to close
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) {
+      overlay.classList.remove('open');
+    }
+  });
+});
+
+function restoreOption(groupId, hiddenId, value) {
+  const hidden = document.getElementById(hiddenId);
+  if (hidden) hidden.value = value || '';
+  // find option btns in same modal
+  const modal = document.getElementById(`modal-${groupId}`) || document.querySelector(`#modal-${groupId.split('-')[0]}`);
+  // just scan all option-btns near hidden
+  if (!value) return;
+  const container = hidden.closest('.form-group');
+  if (!container) return;
+  container.querySelectorAll('.option-btn').forEach(btn => {
+    btn.classList.toggle('selected', btn.textContent.trim() === value.trim());
+  });
+}
+
+// ===================== OPTION SELECT =====================
+function selectOption(btn, hiddenId, value) {
+  const group = btn.closest('.option-group') || btn.parentElement;
+  group.querySelectorAll('.option-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById(hiddenId).value = value;
+}
+
+function toggleTag(btn, group) {
+  btn.classList.toggle('selected');
+}
+
+// ===================== SAVE FUNCTIONS =====================
+function saveWeight() {
+  const rec = getRecord(currentDate);
+  rec.weight.morning = document.getElementById('weightMorn').value;
+  rec.weight.evening = document.getElementById('weightEve').value;
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('weight');
+  showToast('体重を保存しました');
+}
+
+function saveMeal() {
+  const rec = getRecord(currentDate);
+  ['breakfast','lunch','dinner'].forEach(meal => {
+    const items = [];
+    document.querySelectorAll(`#mealTags-${meal} .tag-btn.selected`).forEach(btn => items.push(btn.textContent));
+    rec.meals[meal].items = items;
+    rec.meals[meal].amount = document.getElementById(`mealAmountVal-${meal}`).value;
+    rec.meals[meal].note = document.getElementById(`mealNote-${meal}`).value;
+  });
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('meal');
+  showToast('食事を保存しました');
+}
+
+function selectAlcohol(val) {
+  const rec_has = val === 'yes';
+  document.getElementById('alcNoneBtn').classList.toggle('selected', !rec_has);
+  document.getElementById('alcYesBtn').classList.toggle('selected', rec_has);
+  document.getElementById('alcDetails').style.display = rec_has ? 'block' : 'none';
+}
+
+function saveAlcohol() {
+  const rec = getRecord(currentDate);
+  const hasAlc = document.getElementById('alcYesBtn').classList.contains('selected');
+  const hasNone = document.getElementById('alcNoneBtn').classList.contains('selected');
+  if (!hasAlc && !hasNone) { rec.alcohol.hasAlcohol = null; }
+  else { rec.alcohol.hasAlcohol = hasAlc; }
+  const types = [];
+  document.querySelectorAll('#modal-alcohol .tag-btn.selected').forEach(b => types.push(b.textContent));
+  rec.alcohol.types = types;
+  rec.alcohol.cups = document.getElementById('alcCupsVal').value;
+  rec.alcohol.place = document.getElementById('alcPlaceVal').value;
+  rec.alcohol.note = document.getElementById('alcNote').value;
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('alcohol');
+  showToast('飲酒を保存しました');
+}
+
+function saveExercise() {
+  const rec = getRecord(currentDate);
+  const types = [];
+  document.querySelectorAll('#modal-exercise .tag-btn.selected').forEach(b => types.push(b.textContent));
+  rec.exercise.types = types;
+  rec.exercise.duration = document.getElementById('exDurVal').value;
+  rec.exercise.note = document.getElementById('exNote').value;
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('exercise');
+  showToast('運動を保存しました');
+}
+
+function saveSleep() {
+  const rec = getRecord(currentDate);
+  rec.sleep.bedTime = document.getElementById('sleepBed').value;
+  rec.sleep.wakeTime = document.getElementById('sleepWake').value;
+  rec.sleep.hours = document.getElementById('sleepHours').value;
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('sleep');
+  showToast('睡眠を保存しました');
+}
+
+function saveToilet() {
+  const rec = getRecord(currentDate);
+  rec.toilet.bowelCount = document.getElementById('toiletBowelCount').value;
+  rec.toilet.bowelCondition = document.getElementById('toiletBowelCond').value;
+  rec.toilet.urination = document.getElementById('toiletUrine').value;
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('toilet');
+  showToast('トイレを保存しました');
+}
+
+function saveWater() {
+  const rec = getRecord(currentDate);
+  rec.water.intake = document.getElementById('waterIntake').value;
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('water');
+  showToast('水分を保存しました');
+}
+
+function saveCondition() {
+  const rec = getRecord(currentDate);
+  const tags = [];
+  document.querySelectorAll('#modal-condition .tag-btn.selected').forEach(b => tags.push(b.textContent));
+  rec.condition.tags = tags;
+  rec.condition.memo = document.getElementById('condMemo').value;
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('condition');
+  showToast('体調を保存しました');
+}
+
+function savePhoto() {
+  const rec = getRecord(currentDate);
+  rec.photos = tempPhotos;
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  closeModal('photo');
+  showToast('写真を保存しました');
+}
+
+// ===================== MEAL TABS =====================
+function switchMealTab(meal, btn) {
+  document.querySelectorAll('.meal-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.meal-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`mealPanel-${meal}`).classList.add('active');
+}
+
+// ===================== PHOTO =====================
+function addPhoto(event) {
+  const files = event.target.files;
+  if (!files.length) return;
+  if (tempPhotos.length >= 5) { showToast('写真は最大5枚です'); return; }
+  Array.from(files).forEach(file => {
+    if (tempPhotos.length >= 5) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      tempPhotos.push(e.target.result);
+      renderPhotoPreview();
+    };
+    reader.readAsDataURL(file);
+  });
+  event.target.value = '';
+}
+
+function renderPhotoPreview() {
+  const container = document.getElementById('photoPreview');
+  container.innerHTML = '';
+  tempPhotos.forEach((src, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'photo-thumb-wrap';
+    const img = document.createElement('img');
+    img.className = 'photo-thumb';
+    img.src = src;
+    const del = document.createElement('button');
+    del.className = 'photo-del-btn';
+    del.textContent = '×';
+    del.onclick = () => { tempPhotos.splice(i,1); renderPhotoPreview(); };
+    wrap.appendChild(img);
+    wrap.appendChild(del);
+    container.appendChild(wrap);
+  });
+  if (tempPhotos.length < 5) {
+    const add = document.createElement('button');
+    add.className = 'photo-add-btn';
+    add.textContent = '+';
+    add.onclick = () => document.getElementById('photoInput').click();
+    container.appendChild(add);
+  }
+}
+
+// ===================== COPY PREV DAY =====================
+function copyPrevDay() {
+  const d = new Date(currentDate + 'T00:00:00');
+  d.setDate(d.getDate()-1);
+  const prevStr = d.toISOString().slice(0,10);
+  const prev = data[prevStr];
+  if (!prev) { showToast('前日のデータがありません'); return; }
+  if (!confirm('前日のデータをコピーしますか？（体重・飲酒・トイレはコピーしません）')) return;
+  const rec = getRecord(currentDate);
+  // copy meals
+  rec.meals = JSON.parse(JSON.stringify(prev.meals));
+  // copy sleep
+  rec.sleep = JSON.parse(JSON.stringify(prev.sleep));
+  // copy water
+  rec.water = JSON.parse(JSON.stringify(prev.water));
+  // copy exercise
+  rec.exercise = JSON.parse(JSON.stringify(prev.exercise));
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  showToast('前日のデータをコピーしました');
+}
+
+// ===================== GRAPH =====================
+function switchGraphTab(days, btn) {
+  currentGraphDays = days;
+  document.querySelectorAll('.graph-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderGraphModal();
+}
+
+function getWeightData(days) {
+  const dates = Object.keys(data).sort();
+  let filtered = dates;
+  if (days !== 'all') {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - parseInt(days));
+    const cutStr = cutoff.toISOString().slice(0,10);
+    filtered = dates.filter(d => d >= cutStr);
+  }
+  return {
+    labels: filtered.map(d => d.slice(5)),
+    values: filtered.map(d => {
+      const r = data[d];
+      return parseFloat(r.weight.morning || r.weight.evening) || null;
+    })
+  };
+}
+
+function renderGraphModal() {
+  if (graphModalChart) graphModalChart.destroy();
+  const { labels, values } = getWeightData(currentGraphDays);
+  const ctx = document.getElementById('graphModalChart').getContext('2d');
+  graphModalChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: '体重 (kg)',
+        data: values,
+        borderColor: '#e8805a',
+        backgroundColor: 'rgba(232,128,90,0.1)',
+        borderWidth: 2.5,
+        pointBackgroundColor: '#e8805a',
+        pointRadius: 4,
+        tension: 0.4,
+        spanGaps: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: {
+          grid: { color: '#f0e8e0' },
+          ticks: { font: { size: 11 } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { font: { size: 10 }, maxTicksLimit: 10 }
+        }
+      }
+    }
+  });
+}
+
+// ===================== WEEK/MONTH VIEW =====================
+function getWeekRange() {
+  const d = new Date(currentDate + 'T00:00:00');
+  const day = d.getDay();
+  const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day-1));
+  const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+  return { start: mon.toISOString().slice(0,10), end: sun.toISOString().slice(0,10) };
+}
+
+function getMonthRange() {
+  const [y, m] = currentDate.split('-');
+  return {
+    start: `${y}-${m}-01`,
+    end: `${y}-${m}-${new Date(y, m, 0).getDate()}`
+  };
+}
+
+function getRecordsInRange(start, end) {
+  return Object.keys(data)
+    .filter(d => d >= start && d <= end)
+    .sort()
+    .map(d => data[d]);
+}
+
+function renderWeekView() {
+  const { start, end } = getWeekRange();
+  const recs = getRecordsInRange(start, end);
+  const weights = recs.map(r => parseFloat(r.weight.morning||r.weight.evening)).filter(Boolean);
+  const drinkDays = recs.filter(r => r.alcohol.hasAlcohol === true).length;
+  const exDays = recs.filter(r => r.exercise.types && r.exercise.types.length && !r.exercise.types.includes('なし')).length;
+  const avgW = weights.length ? (weights.reduce((a,b)=>a+b,0)/weights.length).toFixed(1) : '---';
+  document.getElementById('weekStats').innerHTML = `
+    <div class="stat-row"><span class="stat-label">期間</span><span class="stat-value">${start} 〜 ${end}</span></div>
+    <div class="stat-row"><span class="stat-label">平均体重</span><span class="stat-value">${avgW}${avgW!=='---'?'kg':''}</span></div>
+    <div class="stat-row"><span class="stat-label">飲酒日数</span><span class="stat-value">${drinkDays}日</span></div>
+    <div class="stat-row"><span class="stat-label">運動日数</span><span class="stat-value">${exDays}日</span></div>
+    <div class="stat-row"><span class="stat-label">記録日数</span><span class="stat-value">${recs.length}日</span></div>
+  `;
+  // chart
+  if (weekChartInst) weekChartInst.destroy();
+  const labels = recs.map(r => r.date.slice(5));
+  const vals = recs.map(r => parseFloat(r.weight.morning||r.weight.evening)||null);
+  const ctx = document.getElementById('weekChart').getContext('2d');
+  weekChartInst = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ label: '体重', data: vals, borderColor: '#e8805a', backgroundColor: 'rgba(232,128,90,0.1)', borderWidth: 2, pointRadius: 4, tension: 0.4, spanGaps: true }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: '#f0e8e0' } }, x: { grid: { display: false } } } }
+  });
+}
+
+function renderMonthView() {
+  const { start, end } = getMonthRange();
+  const recs = getRecordsInRange(start, end);
+  const weights = recs.map(r => parseFloat(r.weight.morning||r.weight.evening)).filter(Boolean);
+  const drinkDays = recs.filter(r => r.alcohol.hasAlcohol === true).length;
+  const exDays = recs.filter(r => r.exercise.types && r.exercise.types.length && !r.exercise.types.includes('なし')).length;
+  const avgW = weights.length ? (weights.reduce((a,b)=>a+b,0)/weights.length).toFixed(1) : '---';
+  const minW = weights.length ? Math.min(...weights).toFixed(1) : '---';
+  const maxW = weights.length ? Math.max(...weights).toFixed(1) : '---';
+  document.getElementById('monthStats').innerHTML = `
+    <div class="stat-row"><span class="stat-label">期間</span><span class="stat-value">${start} 〜 ${end}</span></div>
+    <div class="stat-row"><span class="stat-label">平均体重</span><span class="stat-value">${avgW}${avgW!=='---'?'kg':''}</span></div>
+    <div class="stat-row"><span class="stat-label">最低体重</span><span class="stat-value">${minW}${minW!=='---'?'kg':''}</span></div>
+    <div class="stat-row"><span class="stat-label">最高体重</span><span class="stat-value">${maxW}${maxW!=='---'?'kg':''}</span></div>
+    <div class="stat-row"><span class="stat-label">飲酒日数</span><span class="stat-value">${drinkDays}日</span></div>
+    <div class="stat-row"><span class="stat-label">運動日数</span><span class="stat-value">${exDays}日</span></div>
+    <div class="stat-row"><span class="stat-label">記録日数</span><span class="stat-value">${recs.length}日</span></div>
+  `;
+  if (monthChartInst) monthChartInst.destroy();
+  const labels = recs.map(r => r.date.slice(5));
+  const vals = recs.map(r => parseFloat(r.weight.morning||r.weight.evening)||null);
+  const ctx = document.getElementById('monthChart').getContext('2d');
+  monthChartInst = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ label: '体重', data: vals, borderColor: '#5ab8a8', backgroundColor: 'rgba(90,184,168,0.1)', borderWidth: 2, pointRadius: 3, tension: 0.4, spanGaps: true }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: '#f0e8e0' } }, x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } } } }
+  });
+}
+
+// ===================== EXPORT =====================
+function switchExportTab(type, btn) {
+  currentExportTab = type;
+  document.querySelectorAll('.export-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderExport();
+}
+
+function renderExport() {
+  let text = '';
+  if (currentExportTab === 'day') text = buildDayText(currentDate);
+  else if (currentExportTab === 'week') text = buildWeekText();
+  else text = buildMonthText();
+  document.getElementById('exportText').value = text;
+}
+
+function buildDayText(dateStr) {
+  const r = data[dateStr];
+  if (!r) return `${dateStr} のデータがありません`;
+  const lines = [];
+  lines.push('【健康記録】\n');
+  lines.push(`■日付\n${dateStr}\n`);
+  lines.push(`■体重\n朝: ${r.weight.morning||'未入力'}kg\n夜: ${r.weight.evening||'未入力'}kg\n`);
+  const meals = [];
+  ['breakfast','lunch','dinner'].forEach((m,i) => {
+    const lbl = ['朝','昼','夜'][i];
+    const items = r.meals[m].items.join('、') || '未入力';
+    const note = r.meals[m].note ? ` (${r.meals[m].note})` : '';
+    meals.push(`${lbl}: ${items}${note}`);
+  });
+  lines.push(`■食事\n${meals.join('\n')}\n`);
+  if (r.alcohol.hasAlcohol === true) {
+    lines.push(`■飲酒\n${r.alcohol.types.join('・')} ${r.alcohol.cups}杯（${r.alcohol.place}）${r.alcohol.note?'\n'+r.alcohol.note:''}\n`);
+  } else if (r.alcohol.hasAlcohol === false) {
+    lines.push(`■飲酒\nなし\n`);
+  }
+  if (r.exercise.types && r.exercise.types.length) {
+    lines.push(`■運動\n${r.exercise.types.join('・')} ${r.exercise.duration||''} ${r.exercise.note||''}\n`);
+  }
+  if (r.sleep.bedTime || r.sleep.wakeTime) {
+    lines.push(`■睡眠\n就寝: ${r.sleep.bedTime||'---'}\n起床: ${r.sleep.wakeTime||'---'}${r.sleep.hours?'\n'+r.sleep.hours:''}\n`);
+  }
+  if (r.toilet.bowelCount) {
+    lines.push(`■トイレ\n排便: ${r.toilet.bowelCount} / ${r.toilet.bowelCondition||''}\n排尿: ${r.toilet.urination||''}\n`);
+  }
+  if (r.water.intake) lines.push(`■水分\n${r.water.intake}\n`);
+  if (r.condition.tags.length || r.condition.memo) {
+    lines.push(`■体調\n${r.condition.tags.join('、')}${r.condition.memo?'\nメモ: '+r.condition.memo:''}\n`);
+  }
+  lines.push('\nこの記録をもとに、傾向と改善点を簡潔に分析してください。');
+  return lines.join('\n');
+}
+
+function buildWeekText() {
+  const { start, end } = getWeekRange();
+  const recs = getRecordsInRange(start, end);
+  if (!recs.length) return '今週のデータがありません';
+  let text = `【週間健康記録】\n期間: ${start} 〜 ${end}\n\n`;
+  recs.forEach(r => { text += buildDayText(r.date) + '\n---\n\n'; });
+  text += 'この週の記録を分析し、傾向と改善点を教えてください。';
+  return text;
+}
+
+function buildMonthText() {
+  const { start, end } = getMonthRange();
+  const recs = getRecordsInRange(start, end);
+  if (!recs.length) return '今月のデータがありません';
+  const weights = recs.map(r => parseFloat(r.weight.morning||r.weight.evening)).filter(Boolean);
+  const avgW = weights.length ? (weights.reduce((a,b)=>a+b,0)/weights.length).toFixed(1) : '---';
+  const drinkDays = recs.filter(r => r.alcohol.hasAlcohol===true).length;
+  const exDays = recs.filter(r => r.exercise.types&&r.exercise.types.length&&!r.exercise.types.includes('なし')).length;
+  return `【月間健康記録サマリー】\n期間: ${start} 〜 ${end}\n記録日数: ${recs.length}日\n\n■体重\n平均: ${avgW}kg\n最低: ${weights.length?Math.min(...weights).toFixed(1):'---'}kg\n最高: ${weights.length?Math.max(...weights).toFixed(1):'---'}kg\n\n■生活習慣\n飲酒日数: ${drinkDays}日\n運動日数: ${exDays}日\n\nこの月の記録を分析し、傾向と改善点を教えてください。`;
+}
+
+function copyExportText() {
+  const text = document.getElementById('exportText').value;
+  navigator.clipboard.writeText(text).then(() => showToast('クリップボードにコピーしました')).catch(() => {
+    document.getElementById('exportText').select();
+    document.execCommand('copy');
+    showToast('コピーしました');
+  });
+}
+
+// ===================== SETTINGS =====================
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `diet_diary_backup_${todayStr()}.json`;
+  a.click();
+  showToast('バックアップを書き出しました');
+}
+
+function importJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const imported = JSON.parse(e.target.result);
+      if (confirm('データを上書きインポートしますか？')) {
+        data = imported;
+        saveData();
+        renderDay();
+        showToast('データをインポートしました');
+      }
+    } catch { showToast('ファイルが正しくありません'); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function clearAllData() {
+  if (confirm('すべてのデータを削除します。元に戻せません。よろしいですか？')) {
+    data = {};
+    saveData();
+    renderDay();
+    showToast('データを削除しました');
+  }
+}
+
+// ===================== TOAST =====================
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+</script>
+</body>
+</html>
