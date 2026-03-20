@@ -152,78 +152,59 @@
     margin: 0 auto;
   }
 
-  /* ===== STATUS SUMMARY ===== */
-  .status-card {
+  /* ===== STATUS STRIP ===== */
+  .status-strip {
     background: var(--card);
     border-radius: var(--radius);
-    padding: 16px;
+    padding: 10px 14px 12px;
     box-shadow: var(--shadow);
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
 
-  .status-header {
+  .status-strip-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
 
-  .status-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--text-sub);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .copy-prev-btn {
-    padding: 6px 14px;
-    border-radius: 20px;
-    border: none;
-    background: var(--accent-light);
-    color: var(--accent);
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: 'Noto Sans JP', sans-serif;
-    transition: all 0.2s;
-  }
-  .copy-prev-btn:active { background: var(--accent); color: white; }
-
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+  .status-chips-wrap {
+    display: flex;
+    flex-wrap: wrap;
     gap: 6px;
   }
 
-  .status-item {
-    display: flex;
-    flex-direction: column;
+  .status-chip {
+    display: inline-flex;
     align-items: center;
-    padding: 8px 4px;
-    border-radius: 10px;
-    background: var(--bg);
-    gap: 3px;
-  }
-
-  .status-item-label {
-    font-size: 11px;
-    color: var(--text-sub);
-    font-weight: 600;
-  }
-
-  .status-badge {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 8px;
+    gap: 4px;
+    padding: 5px 10px;
     border-radius: 20px;
-    background: var(--border);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-family: 'Noto Sans JP', sans-serif;
+    border: 1.5px solid var(--border);
+    background: var(--bg);
     color: var(--text-muted);
+    transition: all 0.2s;
   }
 
-  .status-badge.done {
-    background: #d4f5e9;
+  .status-chip.done {
+    background: #edfaf4;
+    border-color: #7ecba8;
     color: #2a9d6a;
+  }
+
+  .status-chip-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  .status-chip.done .status-chip-dot {
+    background: #2a9d6a;
   }
 
   /* ===== CATEGORY GRID ===== */
@@ -261,20 +242,27 @@
     top: 0; left: 0; right: 0;
     height: 4px;
     border-radius: 4px 4px 0 0;
+    transition: height 0.2s;
   }
 
-  .cat-btn.weight::before { background: var(--primary); }
-  .cat-btn.meal::before { background: var(--yellow); }
+  /* done state: accent bar grows + card tint */
+  .cat-btn.done {
+    background: var(--card);
+  }
+  .cat-btn.done::before { height: 100%; opacity: 0.07; border-radius: var(--radius); }
+
+  .cat-btn.weight::before  { background: var(--primary); }
+  .cat-btn.meal::before    { background: var(--yellow); }
   .cat-btn.alcohol::before { background: var(--purple); }
-  .cat-btn.exercise::before { background: var(--accent); }
-  .cat-btn.sleep::before { background: #7eb8e8; }
-  .cat-btn.toilet::before { background: #b8d47e; }
-  .cat-btn.water::before { background: #7ed4e8; }
-  .cat-btn.condition::before { background: var(--pink); }
-  .cat-btn.photo::before { background: #e8c27e; }
-  .cat-btn.graph::before { background: var(--accent); }
-  .cat-btn.export::before { background: var(--primary); }
-  .cat-btn.settings::before { background: var(--text-muted); }
+  .cat-btn.exercise::before{ background: var(--accent); }
+  .cat-btn.sleep::before   { background: #7eb8e8; }
+  .cat-btn.toilet::before  { background: #b8d47e; }
+  .cat-btn.water::before   { background: #7ed4e8; }
+  .cat-btn.condition::before{ background: var(--pink); }
+  .cat-btn.photo::before   { background: #e8c27e; }
+  .cat-btn.graph::before   { background: var(--accent); }
+  .cat-btn.export::before  { background: var(--primary); }
+  .cat-btn.settings::before{ background: var(--text-muted); }
 
   .cat-btn img {
     width: 44px;
@@ -290,12 +278,25 @@
     text-align: center;
   }
 
+  /* checkmark badge replaces the old dot */
   .cat-btn-dot {
     position: absolute;
-    top: 8px; right: 8px;
-    width: 8px; height: 8px;
+    top: 6px; right: 6px;
+    width: 16px; height: 16px;
     border-radius: 50%;
     background: #2a9d6a;
+    color: white;
+    font-size: 10px;
+    font-weight: 800;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  }
+
+  .cat-btn-dot.visible {
+    display: flex;
   }
 
   /* ===== WEEK / MONTH VIEWS ===== */
@@ -761,6 +762,312 @@
 
   .empty-state-icon { font-size: 48px; margin-bottom: 10px; }
 
+  /* ===== MEAL EVENT CARDS (inside modal) ===== */
+  .meal-event-card {
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    position: relative;
+  }
+  .meal-event-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .meal-event-type-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .meal-event-time-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-left: 6px;
+  }
+  .meal-event-btns { display: flex; gap: 6px; }
+  .meal-event-edit-btn, .meal-event-del-btn {
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 2px solid var(--border);
+    background: var(--card);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-sub);
+  }
+  .meal-event-edit-btn:active { background: var(--yellow); border-color: var(--yellow); color: var(--text); }
+  .meal-event-del-btn:active  { background: #e84040; border-color: #e84040; color: white; }
+
+  .meal-event-foods { display: flex; flex-direction: column; gap: 4px; }
+  .meal-event-food-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    background: var(--card);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .meal-event-food-name { font-size: 12px; font-weight: 600; color: var(--text); }
+  .meal-event-portion {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 20px;
+  }
+  .mep-s { background: #d4f5e9; color: #2a9d6a; }
+  .mep-m { background: #fef3d0; color: #b8820a; }
+  .mep-l { background: #fde0e0; color: #c04040; }
+
+  .meal-event-note { font-size: 11px; color: var(--text-muted); margin-top: 6px; font-style: italic; }
+
+  /* food chips in meal form */
+  .meal-food-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: 20px;
+    padding: 3px 4px 3px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    animation: chipPop 0.18s cubic-bezier(0.34,1.56,0.64,1);
+  }
+  @keyframes chipPop { from{transform:scale(0.6);opacity:0} to{transform:scale(1);opacity:1} }
+  .meal-chip-portion {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 20px;
+    border: none;
+    cursor: pointer;
+  }
+  .meal-chip-portion.cp-s { background: #d4f5e9; color: #2a9d6a; }
+  .meal-chip-portion.cp-m { background: #fef3d0; color: #b8820a; }
+  .meal-chip-portion.cp-l { background: #fde0e0; color: #c04040; }
+  .meal-chip-remove {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: none;
+    background: var(--border);
+    color: var(--text-sub);
+    font-size: 11px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .meal-chip-remove:active { background: #e84040; color: white; }
+
+  .meal-preset-tag {
+    padding: 7px 13px;
+    border-radius: 20px;
+    border: 2px solid var(--border);
+    background: var(--bg);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-sub);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .meal-preset-tag.selected {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: white;
+  }
+
+  /* ===== DATE HEADING ===== */
+  .date-heading {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 16px 18px 14px;
+    box-shadow: var(--shadow);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .date-heading-left {}
+
+  .date-heading-today-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--primary);
+    margin-bottom: 3px;
+  }
+
+  .date-heading-full {
+    font-family: 'Nunito', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.3px;
+  }
+
+  .date-heading-weight {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--primary);
+    font-family: 'Nunito', sans-serif;
+    line-height: 1;
+  }
+
+  .date-heading-weight-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-align: right;
+    margin-top: 2px;
+  }
+
+  /* ===== INLINE MEAL FEED ===== */
+  .inline-meals-section {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+    margin-bottom: 14px;
+  }
+
+  .inline-meals-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .inline-meals-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-sub);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .inline-add-meal-btn {
+    padding: 5px 13px;
+    border-radius: 20px;
+    border: none;
+    background: var(--yellow);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Noto Sans JP', sans-serif;
+    transition: all 0.15s;
+  }
+  .inline-add-meal-btn:active { opacity: 0.8; transform: scale(0.96); }
+
+  .inline-meal-card {
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border-left: 3px solid var(--yellow);
+    position: relative;
+  }
+
+  .inline-meal-card:last-child { margin-bottom: 0; }
+
+  .inline-meal-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+  }
+
+  .inline-meal-type {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .inline-meal-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 6px;
+  }
+
+  .inline-meal-edit-btn {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .inline-meal-edit-btn:active { background: var(--border); }
+
+  .inline-meal-foods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .inline-food-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .inline-food-portion {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 10px;
+  }
+
+  .ifp-s { background: #d4f5e9; color: #2a9d6a; }
+  .ifp-m { background: #fef3d0; color: #b8820a; }
+  .ifp-l { background: #fde0e0; color: #c04040; }
+
+  .inline-meal-note {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 5px;
+    font-style: italic;
+  }
+
+  .inline-meals-empty {
+    text-align: center;
+    padding: 12px 0 4px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  /* ===== FOOTER ===== */
+  .app-footer {
+    text-align: center;
+    padding: 12px 20px 24px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: 'Noto Sans JP', sans-serif;
+    letter-spacing: 0.3px;
+  }
+
   /* weight display in summary */
   .weight-display {
     font-size: 28px;
@@ -785,12 +1092,12 @@
 
 <!-- DATE NAV -->
 <div class="date-nav">
-  <button class="date-nav-btn" onclick="changeDate(-1)">‹</button>
+  <button class="date-nav-btn" onclick="changeDate(-1)">&#8249;</button>
   <div class="date-display">
-    <input type="date" id="dateInput" onchange="onDateChange()">
+    <input type="date" id="dateInput">
   </div>
   <button class="date-today-btn" onclick="goToday()">今日</button>
-  <button class="date-nav-btn" onclick="changeDate(1)">›</button>
+  <button class="date-nav-btn" onclick="changeDate(1)">&#8250;</button>
 </div>
 
 <!-- VIEW TABS -->
@@ -806,16 +1113,36 @@
   <!-- DAY VIEW -->
   <div class="view-panel active" id="viewDay">
 
-    <!-- Status Summary -->
-    <div class="status-card">
-      <div class="status-header">
-        <div class="status-title">本日の記録</div>
+    <!-- Date Heading -->
+    <div class="date-heading" id="dateHeading">
+      <div class="date-heading-left">
+        <div class="date-heading-today-label" id="dateHeadingLabel">今日</div>
+        <div class="date-heading-full" id="dateHeadingFull"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div id="dateHeadingWeight" style="display:none">
+          <div class="date-heading-weight"><span id="dateHeadingWeightVal">--</span><span style="font-size:14px;color:var(--text-sub)">kg</span></div>
+          <div class="date-heading-weight-sub">朝体重</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Strip (2-row wrap) -->
+    <div class="status-strip">
+      <div class="status-strip-top">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">記録状況</div>
         <button class="copy-prev-btn" onclick="copyPrevDay()">前日コピー</button>
       </div>
-      <div id="weightSummaryDisplay" style="display:none" class="weight-display">
-        <span id="weightMornDisplay">--</span>kg <span>朝</span>
+      <div class="status-chips-wrap" id="statusGrid"></div>
+    </div>
+
+    <!-- Inline Meal Feed -->
+    <div class="inline-meals-section">
+      <div class="inline-meals-header">
+        <div class="inline-meals-title">🍽 食事記録</div>
+        <button class="inline-add-meal-btn" onclick="openModal('meal')">＋ 追加・編集</button>
       </div>
-      <div class="status-grid" id="statusGrid"></div>
+      <div id="inlineMealFeed"></div>
     </div>
 
     <!-- Category Grid -->
@@ -911,6 +1238,8 @@
 
 </div><!-- end main -->
 
+<div class="app-footer">Made by Hitoshi | English Teacher</div>
+
 <!-- ======================== MODALS ======================== -->
 
 <!-- WEIGHT MODAL -->
@@ -935,81 +1264,78 @@
   </div>
 </div>
 
-<!-- MEAL MODAL -->
+<!-- MEAL MODAL (multi-event system) -->
 <div class="modal-overlay" id="modal-meal">
   <div class="modal">
     <div class="modal-handle"></div>
     <div class="modal-title">
       <img src="images/image_2.jpg" onerror="this.style.display='none'"> 食事
     </div>
-    <div class="meal-tabs">
-      <button class="meal-tab active" onclick="switchMealTab('breakfast', this)">朝食</button>
-      <button class="meal-tab" onclick="switchMealTab('lunch', this)">昼食</button>
-      <button class="meal-tab" onclick="switchMealTab('dinner', this)">夕食</button>
-    </div>
-    <!-- Breakfast -->
-    <div class="meal-panel active" id="mealPanel-breakfast">
+
+    <!-- Meal list for the day -->
+    <div id="mealEventList"></div>
+
+    <!-- Add meal button -->
+    <button class="tag-btn" id="addMealEventBtn" onclick="startNewMealEvent()"
+      style="width:100%;border-radius:var(--radius-sm);padding:12px;font-size:14px;margin-bottom:4px">
+      ＋ 食事を追加
+    </button>
+
+    <!-- Sub-form: add / edit a single meal event -->
+    <div id="mealEventForm" style="display:none;margin-top:14px;border-top:2px solid var(--border);padding-top:14px">
+
+      <!-- Meal type -->
+      <div class="form-group">
+        <label class="form-label">種類</label>
+        <div class="option-group" id="mealTypeGroup">
+          <button class="option-btn" onclick="selectMealEventType(this,'朝食')">朝食</button>
+          <button class="option-btn" onclick="selectMealEventType(this,'昼食')">昼食</button>
+          <button class="option-btn" onclick="selectMealEventType(this,'夕食')">夕食</button>
+          <button class="option-btn" onclick="selectMealEventType(this,'間食')">間食</button>
+          <button class="option-btn" onclick="selectMealEventType(this,'その他')">その他</button>
+        </div>
+        <input type="hidden" id="mealEventType">
+      </div>
+
+      <!-- Time -->
+      <div class="form-group">
+        <label class="form-label">時刻（任意）</label>
+        <input type="time" class="form-input" id="mealEventTime">
+      </div>
+
+      <!-- Food presets -->
       <div class="form-group">
         <label class="form-label">食べたもの</label>
-        <div class="tag-group" id="mealTags-breakfast"></div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">量</label>
-        <div class="option-group" id="mealAmount-breakfast">
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-breakfast','少')">少</button>
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-breakfast','普通')">普通</button>
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-breakfast','多')">多</button>
+        <!-- selected chips -->
+        <div id="mealEventChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:8px 10px;background:var(--bg);border:2px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px">
+          <span id="mealEventChipHint" style="font-size:12px;color:var(--text-muted);font-style:italic">タップして選択 ↓</span>
         </div>
-        <input type="hidden" id="mealAmountVal-breakfast">
+        <!-- preset buttons -->
+        <div id="mealEventPresets" style="display:flex;flex-wrap:wrap;gap:7px;max-height:140px;overflow-y:auto;padding-bottom:4px"></div>
+        <!-- custom input -->
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <input type="text" class="form-input" id="mealEventCustomInput" placeholder="その他を入力…"
+            style="flex:1;padding:9px 13px;font-size:14px"
+            onkeydown="if(event.key==='Enter'){addMealEventCustomFood();event.preventDefault()}">
+          <button class="btn-save" onclick="addMealEventCustomFood()" style="flex:0;padding:9px 16px;font-size:13px">追加</button>
+        </div>
       </div>
+
+      <!-- Note -->
       <div class="form-group">
-        <label class="form-label">メモ</label>
-        <input type="text" class="form-input" id="mealNote-breakfast" placeholder="メモを入力">
+        <label class="form-label">メモ（任意）</label>
+        <input type="text" class="form-input" id="mealEventNote" placeholder="例: 外食、お腹いっぱい…">
+      </div>
+
+      <!-- Sub-form actions -->
+      <div style="display:flex;gap:8px">
+        <button class="btn-cancel" onclick="cancelMealEventForm()" style="flex:1">キャンセル</button>
+        <button class="btn-save" onclick="saveMealEvent()" id="mealEventSaveBtn" style="flex:2">この食事を保存</button>
       </div>
     </div>
-    <!-- Lunch -->
-    <div class="meal-panel" id="mealPanel-lunch">
-      <div class="form-group">
-        <label class="form-label">食べたもの</label>
-        <div class="tag-group" id="mealTags-lunch"></div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">量</label>
-        <div class="option-group" id="mealAmount-lunch">
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-lunch','少')">少</button>
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-lunch','普通')">普通</button>
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-lunch','多')">多</button>
-        </div>
-        <input type="hidden" id="mealAmountVal-lunch">
-      </div>
-      <div class="form-group">
-        <label class="form-label">メモ</label>
-        <input type="text" class="form-input" id="mealNote-lunch" placeholder="メモを入力">
-      </div>
-    </div>
-    <!-- Dinner -->
-    <div class="meal-panel" id="mealPanel-dinner">
-      <div class="form-group">
-        <label class="form-label">食べたもの</label>
-        <div class="tag-group" id="mealTags-dinner"></div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">量</label>
-        <div class="option-group" id="mealAmount-dinner">
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-dinner','少')">少</button>
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-dinner','普通')">普通</button>
-          <button class="option-btn" onclick="selectOption(this,'mealAmountVal-dinner','多')">多</button>
-        </div>
-        <input type="hidden" id="mealAmountVal-dinner">
-      </div>
-      <div class="form-group">
-        <label class="form-label">メモ</label>
-        <input type="text" class="form-input" id="mealNote-dinner" placeholder="メモを入力">
-      </div>
-    </div>
+
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModal('meal')">閉じる</button>
-      <button class="btn-save" onclick="saveMeal()">保存</button>
+      <button class="btn-save" onclick="closeModal('meal')">閉じる</button>
     </div>
   </div>
 </div>
@@ -1341,6 +1667,14 @@
 <script>
 // ===================== STATE =====================
 const FOOD_TAGS = ['オートミール','豆乳','卵','バナナ','ヨーグルト','パン','ご飯','麺','カレー','魚','肉','野菜','弁当','コンビニ食','その他'];
+
+const MEAL_PRESETS = [
+  'ご飯','パン','オートミール','パスタ','うどん','そば','ラーメン','寿司',
+  '焼き肉','とんかつ','鶏むね肉','鶏もも肉','ささみ','魚','卵','豆腐',
+  'サラダ','小鉢','野菜','スープ','クッキー','チョコレート','ヨーグルト',
+  'ナッツ','フルーツ','アイスクリーム','その他'
+];
+
 const STORAGE_KEY = 'dietDiaryData';
 
 let currentDate = todayStr();
@@ -1351,6 +1685,10 @@ let graphModalChart = null;
 let weekChartInst = null;
 let monthChartInst = null;
 let tempPhotos = [];
+
+// meal event state
+let mealEventFoods = [];   // [{name, portion}]
+let editingMealEventId = null;
 
 // ===================== DATE UTILS =====================
 function todayStr() {
@@ -1377,6 +1715,8 @@ function getRecord(dateStr) {
     data[dateStr] = {
       date: dateStr,
       weight: { morning: '', evening: '' },
+      mealEvents: [],
+      // keep legacy meals key for copyPrevDay compatibility
       meals: {
         breakfast: { items: [], amount: '', note: '' },
         lunch: { items: [], amount: '', note: '' },
@@ -1392,37 +1732,27 @@ function getRecord(dateStr) {
       updatedAt: ''
     };
   }
+  if (!data[dateStr].mealEvents) data[dateStr].mealEvents = [];
   return data[dateStr];
 }
 
 // ===================== INIT =====================
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('dateInput').value = currentDate;
-  buildMealTags();
+  const input = document.getElementById('dateInput');
+  input.value = currentDate;
+  input.addEventListener('change', onDateChange);
   renderDay();
 });
-
-function buildMealTags() {
-  ['breakfast','lunch','dinner'].forEach(meal => {
-    const el = document.getElementById(`mealTags-${meal}`);
-    el.innerHTML = '';
-    FOOD_TAGS.forEach(tag => {
-      const btn = document.createElement('button');
-      btn.className = 'tag-btn';
-      btn.textContent = tag;
-      btn.setAttribute('data-group', `mealItems-${meal}`);
-      btn.onclick = () => btn.classList.toggle('selected');
-      el.appendChild(btn);
-    });
-  });
-}
 
 // ===================== DATE NAV =====================
 function changeDate(delta) {
   const d = new Date(currentDate + 'T00:00:00');
   d.setDate(d.getDate() + delta);
   currentDate = d.toISOString().slice(0,10);
-  document.getElementById('dateInput').value = currentDate;
+  const input = document.getElementById('dateInput');
+  input.removeEventListener('change', onDateChange);
+  input.value = currentDate;
+  input.addEventListener('change', onDateChange);
   renderDay();
 }
 
@@ -1433,7 +1763,10 @@ function onDateChange() {
 
 function goToday() {
   currentDate = todayStr();
-  document.getElementById('dateInput').value = currentDate;
+  const input = document.getElementById('dateInput');
+  input.removeEventListener('change', onDateChange);
+  input.value = currentDate;
+  input.addEventListener('change', onDateChange);
   renderDay();
 }
 
@@ -1450,43 +1783,96 @@ function switchView(view, btn) {
 // ===================== RENDER DAY =====================
 function renderDay() {
   const rec = getRecord(currentDate);
-  renderStatusGrid(rec);
-  updateDots(rec);
-  // weight display
-  const wd = document.getElementById('weightSummaryDisplay');
+
+  // --- date heading ---
+  const d = new Date(currentDate + 'T00:00:00');
+  const isToday = currentDate === todayStr();
+  const weekDays = ['日','月','火','水','木','金','土'];
+  const fullLabel = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${weekDays[d.getDay()]}）`;
+  document.getElementById('dateHeadingLabel').textContent = isToday ? '今日' : '';
+  document.getElementById('dateHeadingLabel').style.display = isToday ? 'block' : 'none';
+  document.getElementById('dateHeadingFull').textContent = fullLabel;
+
+  // weight in heading
+  const wEl = document.getElementById('dateHeadingWeight');
   if (rec.weight.morning) {
-    wd.style.display = 'block';
-    document.getElementById('weightMornDisplay').textContent = rec.weight.morning;
+    wEl.style.display = 'block';
+    document.getElementById('dateHeadingWeightVal').textContent = rec.weight.morning;
   } else {
-    wd.style.display = 'none';
+    wEl.style.display = 'none';
   }
+
+  // --- status grid ---
+  renderStatusGrid(rec);
+
+  // --- inline meal feed ---
+  renderInlineMealFeed(rec);
+
+  // --- dots ---
+  updateDots(rec);
+}
+
+function renderInlineMealFeed(rec) {
+  const feed = document.getElementById('inlineMealFeed');
+  const events = rec.mealEvents || [];
+  const portionLabel = { s:'少', m:'普', l:'多' };
+  const portionCls   = { s:'ifp-s', m:'ifp-m', l:'ifp-l' };
+
+  if (!events.length) {
+    feed.innerHTML = '<div class="inline-meals-empty">まだ食事の記録がありません</div>';
+    return;
+  }
+
+  feed.innerHTML = events.map(ev => {
+    const timeStr = ev.time ? `<span class="inline-meal-time">${ev.time}</span>` : '';
+    let foodsHtml = '';
+    if (ev.foods && ev.foods.length) {
+      foodsHtml = '<div class="inline-meal-foods">' +
+        ev.foods.filter(f => f.name).map(f => {
+          const p = f.portion || '';
+          const portionHtml = p ? `<span class="inline-food-portion ${portionCls[p]}">${portionLabel[p]}</span>` : '';
+          return `<span class="inline-food-tag">${escHtml(f.name)}${portionHtml}</span>`;
+        }).join('') + '</div>';
+    }
+    const noteHtml = ev.note ? `<div class="inline-meal-note">${escHtml(ev.note)}</div>` : '';
+    return `<div class="inline-meal-card">
+      <div class="inline-meal-top">
+        <div><span class="inline-meal-type">${escHtml(ev.type||'食事')}</span>${timeStr}</div>
+        <button class="inline-meal-edit-btn" onclick="openMealModalAndEdit('${ev.id}')">編集</button>
+      </div>
+      ${foodsHtml}${noteHtml}
+    </div>`;
+  }).join('');
+}
+
+function openMealModalAndEdit(id) {
+  openModal('meal');
+  // slight delay to let modal open first
+  setTimeout(() => editMealEvent(id), 80);
 }
 
 function renderStatusGrid(rec) {
   const items = [
-    { label: '体重', done: !!(rec.weight.morning || rec.weight.evening) },
-    { label: '食事', done: !!(hasMeal(rec)) },
-    { label: '飲酒', done: rec.alcohol.hasAlcohol !== null },
-    { label: '運動', done: !!(rec.exercise.types && rec.exercise.types.length) },
-    { label: '睡眠', done: !!(rec.sleep.bedTime || rec.sleep.wakeTime) },
+    { label: '体重',   done: !!(rec.weight.morning || rec.weight.evening) },
+    { label: '食事',   done: hasMeal(rec) },
+    { label: '飲酒',   done: rec.alcohol.hasAlcohol !== null },
+    { label: '運動',   done: !!(rec.exercise.types && rec.exercise.types.length) },
+    { label: '睡眠',   done: !!(rec.sleep.bedTime || rec.sleep.wakeTime) },
     { label: 'トイレ', done: !!(rec.toilet.bowelCount) },
-    { label: '水分', done: !!(rec.water.intake) },
-    { label: '体調', done: !!(rec.condition.tags.length || rec.condition.memo) },
-    { label: '写真', done: rec.photos.length > 0 },
+    { label: '水分',   done: !!(rec.water.intake) },
+    { label: '体調',   done: !!(rec.condition.tags.length || rec.condition.memo) },
+    { label: '写真',   done: rec.photos.length > 0 },
   ];
   const grid = document.getElementById('statusGrid');
-  grid.innerHTML = items.map(i => `
-    <div class="status-item">
-      <div class="status-item-label">${i.label}</div>
-      <div class="status-badge ${i.done?'done':''}">${i.done?'✓ 記入済':'未入力'}</div>
-    </div>
-  `).join('');
+  grid.innerHTML = items.map(i =>
+    `<div class="status-chip ${i.done ? 'done' : ''}">
+      <div class="status-chip-dot"></div>${i.label}
+    </div>`
+  ).join('');
 }
 
 function hasMeal(rec) {
-  return ['breakfast','lunch','dinner'].some(m =>
-    rec.meals[m].items.length || rec.meals[m].note
-  );
+  return rec.mealEvents && rec.mealEvents.length > 0;
 }
 
 function updateDots(rec) {
@@ -1516,15 +1902,8 @@ function openModal(type) {
     document.getElementById('weightEve').value = rec.weight.evening || '';
   }
   if (type === 'meal') {
-    ['breakfast','lunch','dinner'].forEach(meal => {
-      // restore tags
-      document.querySelectorAll(`#mealTags-${meal} .tag-btn`).forEach(btn => {
-        btn.classList.toggle('selected', rec.meals[meal].items.includes(btn.textContent));
-      });
-      // restore amount
-      restoreOption(`mealAmount-${meal}`, `mealAmountVal-${meal}`, rec.meals[meal].amount);
-      document.getElementById(`mealNote-${meal}`).value = rec.meals[meal].note || '';
-    });
+    renderMealEventList();
+    hideMealEventForm();
   }
   if (type === 'alcohol') {
     const a = rec.alcohol;
@@ -1634,19 +2013,238 @@ function saveWeight() {
 }
 
 function saveMeal() {
+  // (kept for legacy - actual saving done by saveMealEvent)
+  renderDay();
+  closeModal('meal');
+}
+
+// ===================== MEAL EVENTS =====================
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+function renderMealEventList() {
   const rec = getRecord(currentDate);
-  ['breakfast','lunch','dinner'].forEach(meal => {
-    const items = [];
-    document.querySelectorAll(`#mealTags-${meal} .tag-btn.selected`).forEach(btn => items.push(btn.textContent));
-    rec.meals[meal].items = items;
-    rec.meals[meal].amount = document.getElementById(`mealAmountVal-${meal}`).value;
-    rec.meals[meal].note = document.getElementById(`mealNote-${meal}`).value;
+  const events = rec.mealEvents || [];
+  const container = document.getElementById('mealEventList');
+
+  if (!events.length) {
+    container.innerHTML = '<div style="text-align:center;padding:16px 0 10px;color:var(--text-muted);font-size:13px">まだ食事の記録がありません</div>';
+    return;
+  }
+
+  const portionLabel = { s:'少', m:'普', l:'多' };
+  const portionClass = { s:'mep-s', m:'mep-m', l:'mep-l' };
+
+  container.innerHTML = events.map(ev => {
+    const timeStr = ev.time ? `<span class="meal-event-time-label">${ev.time}</span>` : '';
+    let foodsHtml = '';
+    if (ev.foods && ev.foods.length) {
+      foodsHtml = '<div class="meal-event-foods">' +
+        ev.foods.filter(f => f.name).map(f => {
+          const p = f.portion || '';
+          const pLabel = p ? `<span class="meal-event-portion ${portionClass[p]}">${portionLabel[p]}</span>` : '';
+          return `<div class="meal-event-food-row">
+            <span class="meal-event-food-name">${escHtml(f.name)}</span>
+            ${pLabel}
+          </div>`;
+        }).join('') + '</div>';
+    }
+    const noteHtml = ev.note ? `<div class="meal-event-note">${escHtml(ev.note)}</div>` : '';
+    return `<div class="meal-event-card">
+      <div class="meal-event-card-header">
+        <div><span class="meal-event-type-label">${escHtml(ev.type||'食事')}</span>${timeStr}</div>
+        <div class="meal-event-btns">
+          <button class="meal-event-edit-btn" onclick="editMealEvent('${ev.id}')">編集</button>
+          <button class="meal-event-del-btn"  onclick="deleteMealEvent('${ev.id}')">削除</button>
+        </div>
+      </div>
+      ${foodsHtml}${noteHtml}
+    </div>`;
+  }).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function startNewMealEvent() {
+  editingMealEventId = null;
+  mealEventFoods = [];
+  document.getElementById('mealEventType').value = '';
+  document.getElementById('mealEventTime').value = '';
+  document.getElementById('mealEventNote').value = '';
+  document.getElementById('mealEventSaveBtn').textContent = 'この食事を保存';
+  document.querySelectorAll('#mealTypeGroup .option-btn').forEach(b => b.classList.remove('selected'));
+  buildMealEventPresets();
+  renderMealEventChips();
+  document.getElementById('mealEventForm').style.display = 'block';
+  document.getElementById('addMealEventBtn').style.display = 'none';
+  document.getElementById('mealEventCustomInput').value = '';
+  // set default time to now
+  const now = new Date();
+  document.getElementById('mealEventTime').value =
+    String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+}
+
+function editMealEvent(id) {
+  const rec = getRecord(currentDate);
+  const ev  = rec.mealEvents.find(e => e.id === id);
+  if (!ev) return;
+  editingMealEventId = id;
+  mealEventFoods = (ev.foods || []).map(f => ({ name: f.name, portion: f.portion || '' }));
+  document.getElementById('mealEventType').value = ev.type || '';
+  document.getElementById('mealEventTime').value = ev.time || '';
+  document.getElementById('mealEventNote').value = ev.note || '';
+  document.getElementById('mealEventSaveBtn').textContent = '更新する';
+  // restore type buttons
+  document.querySelectorAll('#mealTypeGroup .option-btn').forEach(b => {
+    b.classList.toggle('selected', b.textContent === ev.type);
   });
+  buildMealEventPresets();
+  renderMealEventChips();
+  document.getElementById('mealEventForm').style.display = 'block';
+  document.getElementById('addMealEventBtn').style.display = 'none';
+  document.getElementById('mealEventCustomInput').value = '';
+}
+
+function deleteMealEvent(id) {
+  if (!confirm('この食事記録を削除しますか？')) return;
+  const rec = getRecord(currentDate);
+  rec.mealEvents = rec.mealEvents.filter(e => e.id !== id);
   rec.updatedAt = new Date().toISOString();
   saveData();
   renderDay();
-  closeModal('meal');
-  showToast('食事を保存しました');
+  renderMealEventList();
+  showToast('削除しました');
+}
+
+function cancelMealEventForm() {
+  hideMealEventForm();
+}
+
+function hideMealEventForm() {
+  document.getElementById('mealEventForm').style.display = 'none';
+  document.getElementById('addMealEventBtn').style.display = '';
+}
+
+function selectMealEventType(btn, val) {
+  document.querySelectorAll('#mealTypeGroup .option-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('mealEventType').value = val;
+}
+
+function buildMealEventPresets() {
+  const container = document.getElementById('mealEventPresets');
+  container.innerHTML = '';
+  MEAL_PRESETS.forEach(name => {
+    const btn = document.createElement('button');
+    btn.className = 'meal-preset-tag' + (mealEventFoods.some(f => f.name === name) ? ' selected' : '');
+    btn.textContent = name;
+    btn.onclick = () => toggleMealEventPreset(name, btn);
+    container.appendChild(btn);
+  });
+}
+
+function toggleMealEventPreset(name, btn) {
+  const idx = mealEventFoods.findIndex(f => f.name === name);
+  if (idx !== -1) { mealEventFoods.splice(idx, 1); btn.classList.remove('selected'); }
+  else            { mealEventFoods.push({ name, portion: '' }); btn.classList.add('selected'); }
+  renderMealEventChips();
+}
+
+function addMealEventCustomFood() {
+  const input = document.getElementById('mealEventCustomInput');
+  const name  = input.value.trim();
+  if (!name) return;
+  if (mealEventFoods.some(f => f.name === name)) { showToast('すでに追加されています'); return; }
+  mealEventFoods.push({ name, portion: '' });
+  input.value = '';
+  buildMealEventPresets();
+  renderMealEventChips();
+}
+
+function renderMealEventChips() {
+  const wrap = document.getElementById('mealEventChips');
+  const hint = document.getElementById('mealEventChipHint');
+  wrap.querySelectorAll('.meal-food-chip').forEach(el => el.remove());
+
+  if (!mealEventFoods.length) { hint.style.display = 'inline'; return; }
+  hint.style.display = 'none';
+
+  const portionCls = { s:'cp-s', m:'cp-m', l:'cp-l' };
+  const portionLbl = { s:'S', m:'M', l:'L' };
+
+  mealEventFoods.forEach((f, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'meal-food-chip';
+    // single row: name | S M L | ×
+    chip.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 8px 6px 12px;width:100%;border-radius:10px;margin-bottom:4px;flex-wrap:nowrap';
+
+    // food name
+    const lbl = document.createElement('span');
+    lbl.textContent = f.name;
+    lbl.style.cssText = 'font-weight:700;font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    chip.appendChild(lbl);
+
+    // S / M / L buttons inline
+    ['s','m','l'].forEach(p => {
+      const pb = document.createElement('button');
+      const isActive = f.portion === p;
+      pb.textContent = portionLbl[p];
+      pb.style.cssText = 'width:28px;height:24px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg);font-family:Noto Sans JP,sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;color:var(--text-sub);flex-shrink:0;padding:0';
+      if (isActive) {
+        const bg    = { s:'#d4f5e9', m:'#fef3d0', l:'#fde0e0' };
+        const color = { s:'#2a9d6a', m:'#b8820a', l:'#c04040' };
+        pb.style.background   = bg[p];
+        pb.style.color        = color[p];
+        pb.style.borderColor  = 'transparent';
+      }
+      pb.onclick = () => {
+        mealEventFoods[i].portion = p;
+        renderMealEventChips();
+      };
+      chip.appendChild(pb);
+    });
+
+    // remove button
+    const rb = document.createElement('button');
+    rb.className = 'meal-chip-remove';
+    rb.innerHTML = '×';
+    rb.style.flexShrink = '0';
+    rb.onclick = () => {
+      mealEventFoods.splice(i, 1);
+      document.querySelectorAll('.meal-preset-tag').forEach(btn => {
+        if (btn.textContent === f.name) btn.classList.remove('selected');
+      });
+      renderMealEventChips();
+    };
+    chip.appendChild(rb);
+
+    wrap.appendChild(chip);
+  });
+}
+
+function saveMealEvent() {
+  const type  = document.getElementById('mealEventType').value || '食事';
+  const time  = document.getElementById('mealEventTime').value;
+  const note  = document.getElementById('mealEventNote').value.trim();
+  const foods = mealEventFoods.filter(f => f.name && f.name.trim());
+
+  const rec = getRecord(currentDate);
+
+  if (editingMealEventId) {
+    const idx = rec.mealEvents.findIndex(e => e.id === editingMealEventId);
+    if (idx !== -1) rec.mealEvents[idx] = { ...rec.mealEvents[idx], type, time, foods, note };
+    showToast('食事を更新しました');
+  } else {
+    rec.mealEvents.push({ id: uid(), type, time, foods, note });
+    showToast('食事を保存しました');
+  }
+
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  hideMealEventForm();
+  renderMealEventList();
 }
 
 function selectAlcohol(val) {
@@ -1746,14 +2344,6 @@ function savePhoto() {
   showToast('写真を保存しました');
 }
 
-// ===================== MEAL TABS =====================
-function switchMealTab(meal, btn) {
-  document.querySelectorAll('.meal-tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  document.querySelectorAll('.meal-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById(`mealPanel-${meal}`).classList.add('active');
-}
-
 // ===================== PHOTO =====================
 function addPhoto(event) {
   const files = event.target.files;
@@ -1806,8 +2396,10 @@ function copyPrevDay() {
   if (!prev) { showToast('前日のデータがありません'); return; }
   if (!confirm('前日のデータをコピーしますか？（体重・飲酒・トイレはコピーしません）')) return;
   const rec = getRecord(currentDate);
-  // copy meals
-  rec.meals = JSON.parse(JSON.stringify(prev.meals));
+  // copy meal events
+  if (prev.mealEvents && prev.mealEvents.length) {
+    rec.mealEvents = prev.mealEvents.map(e => ({ ...e, id: uid() }));
+  }
   // copy sleep
   rec.sleep = JSON.parse(JSON.stringify(prev.sleep));
   // copy water
@@ -1986,14 +2578,14 @@ function buildDayText(dateStr) {
   lines.push('【健康記録】\n');
   lines.push(`■日付\n${dateStr}\n`);
   lines.push(`■体重\n朝: ${r.weight.morning||'未入力'}kg\n夜: ${r.weight.evening||'未入力'}kg\n`);
-  const meals = [];
-  ['breakfast','lunch','dinner'].forEach((m,i) => {
-    const lbl = ['朝','昼','夜'][i];
-    const items = r.meals[m].items.join('、') || '未入力';
-    const note = r.meals[m].note ? ` (${r.meals[m].note})` : '';
-    meals.push(`${lbl}: ${items}${note}`);
-  });
-  lines.push(`■食事\n${meals.join('\n')}\n`);
+  if (r.mealEvents && r.mealEvents.length) {
+    const mealLines = r.mealEvents.map(ev => {
+      const foods = (ev.foods||[]).filter(f=>f.name).map(f=>f.name).join('、') || '未記入';
+      const t = ev.time ? ` (${ev.time})` : '';
+      return `${ev.type||'食事'}${t}: ${foods}${ev.note?' / '+ev.note:''}`;
+    });
+    lines.push(`■食事\n${mealLines.join('\n')}\n`);
+  }
   if (r.alcohol.hasAlcohol === true) {
     lines.push(`■飲酒\n${r.alcohol.types.join('・')} ${r.alcohol.cups}杯（${r.alcohol.place}）${r.alcohol.note?'\n'+r.alcohol.note:''}\n`);
   } else if (r.alcohol.hasAlcohol === false) {
