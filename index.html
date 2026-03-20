@@ -1092,12 +1092,12 @@
 
 <!-- DATE NAV -->
 <div class="date-nav">
-  <button class="date-nav-btn" onclick="changeDate(-1)">&#8249;</button>
+  <button class="date-nav-btn" onclick="changeDate(-1)">&lt;</button>
   <div class="date-display">
-    <input type="date" id="dateInput">
+    <input type="date" id="dateInput" onchange="onDateChange(this.value)">
   </div>
   <button class="date-today-btn" onclick="goToday()">今日</button>
-  <button class="date-nav-btn" onclick="changeDate(1)">&#8250;</button>
+  <button class="date-nav-btn" onclick="changeDate(1)">&gt;</button>
 </div>
 
 <!-- VIEW TABS -->
@@ -1691,9 +1691,15 @@ let mealEventFoods = [];   // [{name, portion}]
 let editingMealEventId = null;
 
 // ===================== DATE UTILS =====================
+function localDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
 function todayStr() {
-  const d = new Date();
-  return d.toISOString().slice(0,10);
+  return localDateStr(new Date());
 }
 
 function formatDate(str) {
@@ -1738,35 +1744,37 @@ function getRecord(dateStr) {
 
 // ===================== INIT =====================
 document.addEventListener('DOMContentLoaded', () => {
-  const input = document.getElementById('dateInput');
-  input.value = currentDate;
-  input.addEventListener('change', onDateChange);
+  document.getElementById('dateInput').value = currentDate;
   renderDay();
 });
 
 // ===================== DATE NAV =====================
+// programmaticChange flag prevents onDateChange from firing when we set input.value in code
+let programmaticChange = false;
+
 function changeDate(delta) {
   const d = new Date(currentDate + 'T00:00:00');
   d.setDate(d.getDate() + delta);
-  currentDate = d.toISOString().slice(0,10);
-  const input = document.getElementById('dateInput');
-  input.removeEventListener('change', onDateChange);
-  input.value = currentDate;
-  input.addEventListener('change', onDateChange);
+  currentDate = localDateStr(d);
+  programmaticChange = true;
+  document.getElementById('dateInput').value = currentDate;
+  programmaticChange = false;
   renderDay();
 }
 
-function onDateChange() {
-  currentDate = document.getElementById('dateInput').value;
-  renderDay();
+function onDateChange(val) {
+  if (programmaticChange) return;
+  if (val && val !== currentDate) {
+    currentDate = val;
+    renderDay();
+  }
 }
 
 function goToday() {
   currentDate = todayStr();
-  const input = document.getElementById('dateInput');
-  input.removeEventListener('change', onDateChange);
-  input.value = currentDate;
-  input.addEventListener('change', onDateChange);
+  programmaticChange = true;
+  document.getElementById('dateInput').value = currentDate;
+  programmaticChange = false;
   renderDay();
 }
 
@@ -2391,7 +2399,7 @@ function renderPhotoPreview() {
 function copyPrevDay() {
   const d = new Date(currentDate + 'T00:00:00');
   d.setDate(d.getDate()-1);
-  const prevStr = d.toISOString().slice(0,10);
+  const prevStr = localDateStr(d);
   const prev = data[prevStr];
   if (!prev) { showToast('前日のデータがありません'); return; }
   if (!confirm('前日のデータをコピーしますか？（体重・飲酒・トイレはコピーしません）')) return;
@@ -2426,7 +2434,7 @@ function getWeightData(days) {
   if (days !== 'all') {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - parseInt(days));
-    const cutStr = cutoff.toISOString().slice(0,10);
+    const cutStr = localDateStr(cutoff);
     filtered = dates.filter(d => d >= cutStr);
   }
   return {
@@ -2482,7 +2490,7 @@ function getWeekRange() {
   const day = d.getDay();
   const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day-1));
   const sun = new Date(mon); sun.setDate(mon.getDate()+6);
-  return { start: mon.toISOString().slice(0,10), end: sun.toISOString().slice(0,10) };
+  return { start: localDateStr(mon), end: localDateStr(sun) };
 }
 
 function getMonthRange() {
