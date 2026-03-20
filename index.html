@@ -174,6 +174,21 @@
     gap: 6px;
   }
 
+  .copy-prev-btn {
+    padding: 5px 13px;
+    border-radius: 20px;
+    border: none;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Noto Sans JP', sans-serif;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .copy-prev-btn:active { background: var(--accent); color: white; }
+
   .status-chip {
     display: inline-flex;
     align-items: center;
@@ -1666,8 +1681,6 @@
 
 <script>
 // ===================== STATE =====================
-const FOOD_TAGS = ['オートミール','豆乳','卵','バナナ','ヨーグルト','パン','ご飯','麺','カレー','魚','肉','野菜','弁当','コンビニ食','その他'];
-
 const MEAL_PRESETS = [
   'ご飯','パン','オートミール','パスタ','うどん','そば','ラーメン','寿司',
   '焼き肉','とんかつ','鶏むね肉','鶏もも肉','ささみ','魚','卵','豆腐',
@@ -1714,6 +1727,10 @@ function loadData() {
 
 function saveData() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function reloadData() {
+  data = loadData();
 }
 
 function getRecord(dateStr) {
@@ -1790,6 +1807,7 @@ function switchView(view, btn) {
 
 // ===================== RENDER DAY =====================
 function renderDay() {
+  data = loadData();  // always read fresh from localStorage
   const rec = getRecord(currentDate);
 
   // --- date heading ---
@@ -1838,8 +1856,13 @@ function renderInlineMealFeed(rec) {
       foodsHtml = '<div class="inline-meal-foods">' +
         ev.foods.filter(f => f.name).map(f => {
           const p = f.portion || '';
-          const portionHtml = p ? `<span class="inline-food-portion ${portionCls[p]}">${portionLabel[p]}</span>` : '';
-          return `<span class="inline-food-tag">${escHtml(f.name)}${portionHtml}</span>`;
+          let badge = '';
+          if (f.amount != null && f.amount !== '') {
+            badge = `<span class="inline-food-portion ifp-m">${f.amount}${f.unit||''}</span>`;
+          } else if (p) {
+            badge = `<span class="inline-food-portion ${portionCls[p]}">${portionLabel[p]}</span>`;
+          }
+          return `<span class="inline-food-tag">${escHtml(f.name)}${badge}</span>`;
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="inline-meal-note">${escHtml(ev.note)}</div>` : '';
@@ -1985,14 +2008,14 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 function restoreOption(groupId, hiddenId, value) {
   const hidden = document.getElementById(hiddenId);
   if (hidden) hidden.value = value || '';
-  // find option btns in same modal
-  const modal = document.getElementById(`modal-${groupId}`) || document.querySelector(`#modal-${groupId.split('-')[0]}`);
-  // just scan all option-btns near hidden
-  if (!value) return;
-  const container = hidden.closest('.form-group');
+  const container = hidden ? hidden.closest('.form-group') : null;
   if (!container) return;
+  // always clear first, then highlight only if value exists
   container.querySelectorAll('.option-btn').forEach(btn => {
-    btn.classList.toggle('selected', btn.textContent.trim() === value.trim());
+    btn.classList.remove('selected');
+    if (value && btn.textContent.trim() === value.trim()) {
+      btn.classList.add('selected');
+    }
   });
 }
 
@@ -2020,12 +2043,6 @@ function saveWeight() {
   showToast('体重を保存しました');
 }
 
-function saveMeal() {
-  // (kept for legacy - actual saving done by saveMealEvent)
-  renderDay();
-  closeModal('meal');
-}
-
 // ===================== MEAL EVENTS =====================
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
@@ -2049,7 +2066,12 @@ function renderMealEventList() {
       foodsHtml = '<div class="meal-event-foods">' +
         ev.foods.filter(f => f.name).map(f => {
           const p = f.portion || '';
-          const pLabel = p ? `<span class="meal-event-portion ${portionClass[p]}">${portionLabel[p]}</span>` : '';
+          let pLabel = '';
+          if (f.amount != null && f.amount !== '') {
+            pLabel = `<span class="meal-event-portion mep-m">${f.amount}${f.unit||''}</span>`;
+          } else if (p) {
+            pLabel = `<span class="meal-event-portion ${portionClass[p]}">${portionLabel[p]}</span>`;
+          }
           return `<div class="meal-event-food-row">
             <span class="meal-event-food-name">${escHtml(f.name)}</span>
             ${pLabel}
@@ -2098,7 +2120,7 @@ function editMealEvent(id) {
   const ev  = rec.mealEvents.find(e => e.id === id);
   if (!ev) return;
   editingMealEventId = id;
-  mealEventFoods = (ev.foods || []).map(f => ({ name: f.name, portion: f.portion || '' }));
+  mealEventFoods = (ev.foods || []).map(f => ({ name: f.name, portion: f.portion || '', amount: f.amount != null ? f.amount : null, unit: f.unit || null }));
   document.getElementById('mealEventType').value = ev.type || '';
   document.getElementById('mealEventTime').value = ev.time || '';
   document.getElementById('mealEventNote').value = ev.note || '';
@@ -2155,7 +2177,7 @@ function buildMealEventPresets() {
 function toggleMealEventPreset(name, btn) {
   const idx = mealEventFoods.findIndex(f => f.name === name);
   if (idx !== -1) { mealEventFoods.splice(idx, 1); btn.classList.remove('selected'); }
-  else            { mealEventFoods.push({ name, portion: '' }); btn.classList.add('selected'); }
+  else            { mealEventFoods.push({ name, portion: '', amount: null, unit: null }); btn.classList.add('selected'); }
   renderMealEventChips();
 }
 
@@ -2164,28 +2186,47 @@ function addMealEventCustomFood() {
   const name  = input.value.trim();
   if (!name) return;
   if (mealEventFoods.some(f => f.name === name)) { showToast('すでに追加されています'); return; }
-  mealEventFoods.push({ name, portion: '' });
+  mealEventFoods.push({ name, portion: '', amount: null, unit: null });
   input.value = '';
   buildMealEventPresets();
   renderMealEventChips();
 }
 
+// ── last-used unit memory ──────────────────────────────────────────────────
+const UNIT_MEMORY_KEY = 'dietDiaryUnitMemory';
+const UNITS = ['g','ml','個','粒','枚','本','杯','切れ'];
+
+function loadUnitMemory() {
+  try { return JSON.parse(localStorage.getItem(UNIT_MEMORY_KEY)) || {}; } catch { return {}; }
+}
+function saveUnitMemory(mem) {
+  localStorage.setItem(UNIT_MEMORY_KEY, JSON.stringify(mem));
+}
+
 function renderMealEventChips() {
   const wrap = document.getElementById('mealEventChips');
   const hint = document.getElementById('mealEventChipHint');
-  wrap.querySelectorAll('.meal-food-chip').forEach(el => el.remove());
+  wrap.innerHTML = '';
+  wrap.appendChild(hint);
 
   if (!mealEventFoods.length) { hint.style.display = 'inline'; return; }
   hint.style.display = 'none';
 
-  const portionCls = { s:'cp-s', m:'cp-m', l:'cp-l' };
-  const portionLbl = { s:'S', m:'M', l:'L' };
+  const portionBg    = { s:'#d4f5e9', m:'#fef3d0', l:'#fde0e0' };
+  const portionColor = { s:'#2a9d6a', m:'#b8820a', l:'#c04040' };
+  const um = loadUnitMemory();  // load once per render
 
   mealEventFoods.forEach((f, i) => {
+    const hasAmount = f.amount != null && f.amount !== '';
+
+    // ── outer wrapper (chip + optional expandable section) ─────────────────
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'width:100%;margin-bottom:5px';
+
+    // ── main row ────────────────────────────────────────────────────────────
     const chip = document.createElement('div');
     chip.className = 'meal-food-chip';
-    // single row: name | S M L | ×
-    chip.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 8px 6px 12px;width:100%;border-radius:10px;margin-bottom:4px;flex-wrap:nowrap';
+    chip.style.cssText = 'display:flex;align-items:center;gap:5px;padding:6px 8px 6px 12px;width:100%;border-radius:10px;flex-wrap:nowrap';
 
     // food name
     const lbl = document.createElement('span');
@@ -2193,25 +2234,38 @@ function renderMealEventChips() {
     lbl.style.cssText = 'font-weight:700;font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
     chip.appendChild(lbl);
 
-    // S / M / L buttons inline
+    // S / M / L buttons
     ['s','m','l'].forEach(p => {
       const pb = document.createElement('button');
-      const isActive = f.portion === p;
-      pb.textContent = portionLbl[p];
-      pb.style.cssText = 'width:28px;height:24px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg);font-family:Noto Sans JP,sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;color:var(--text-sub);flex-shrink:0;padding:0';
+      const isActive = !hasAmount && f.portion === p;
+      pb.textContent = p.toUpperCase();
+      pb.style.cssText = 'width:26px;height:24px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg);font-family:Noto Sans JP,sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;color:var(--text-sub);flex-shrink:0;padding:0';
       if (isActive) {
-        const bg    = { s:'#d4f5e9', m:'#fef3d0', l:'#fde0e0' };
-        const color = { s:'#2a9d6a', m:'#b8820a', l:'#c04040' };
-        pb.style.background   = bg[p];
-        pb.style.color        = color[p];
-        pb.style.borderColor  = 'transparent';
+        pb.style.background  = portionBg[p];
+        pb.style.color       = portionColor[p];
+        pb.style.borderColor = 'transparent';
       }
       pb.onclick = () => {
         mealEventFoods[i].portion = p;
+        mealEventFoods[i].amount  = null;
+        mealEventFoods[i].unit    = null;
+        // collapse amount section
+        const sec = wrapper.querySelector('.qty-section');
+        if (sec) sec.style.display = 'none';
         renderMealEventChips();
       };
       chip.appendChild(pb);
     });
+
+    // 数量 toggle button
+    const qBtn = document.createElement('button');
+    qBtn.style.cssText = 'height:24px;padding:0 7px;border-radius:6px;border:1.5px solid var(--border);background:' + (hasAmount ? '#fef3d0' : 'var(--bg)') + ';font-family:Noto Sans JP,sans-serif;font-size:10px;font-weight:700;cursor:pointer;color:' + (hasAmount ? '#b8820a' : 'var(--text-sub)') + ';flex-shrink:0;white-space:nowrap';
+    qBtn.textContent = hasAmount ? (f.amount + (f.unit||'')) : '数量';
+    qBtn.onclick = () => {
+      const sec = wrapper.querySelector('.qty-section');
+      if (sec) sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+    };
+    chip.appendChild(qBtn);
 
     // remove button
     const rb = document.createElement('button');
@@ -2226,8 +2280,91 @@ function renderMealEventChips() {
       renderMealEventChips();
     };
     chip.appendChild(rb);
+    wrapper.appendChild(chip);
 
-    wrap.appendChild(chip);
+    // ── quantity section (hidden by default) ────────────────────────────────
+    const sec = document.createElement('div');
+    sec.className = 'qty-section';
+    sec.style.cssText = 'display:' + (hasAmount ? 'block' : 'none') + ';padding:8px 10px 10px 12px;background:var(--bg);border:1.5px solid var(--border);border-top:none;border-radius:0 0 10px 10px;margin-top:-4px';
+
+    // number input + unit select row
+    const inputRow = document.createElement('div');
+    inputRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:7px';
+
+    const numInput = document.createElement('input');
+    numInput.type = 'number';
+    numInput.placeholder = '数量';
+    numInput.value = f.amount != null ? f.amount : '';
+    numInput.style.cssText = 'width:80px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:14px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif';
+    numInput.oninput = () => {
+      const v = numInput.value.trim();
+      mealEventFoods[i].amount  = v === '' ? null : Number(v);
+      mealEventFoods[i].unit    = mealEventFoods[i].unit || unitSel.value || 'g';
+      // S/M/L を必ずクリア（数量があるとき）
+      if (v !== '') mealEventFoods[i].portion = null;
+      renderMealEventChips();
+    };
+    inputRow.appendChild(numInput);
+
+    const unitSel = document.createElement('select');
+    unitSel.style.cssText = 'padding:5px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif;cursor:pointer';
+    const defaultUnit = f.unit || um[f.name] || 'g';
+    UNITS.forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u; opt.textContent = u;
+      if (u === defaultUnit) opt.selected = true;
+      unitSel.appendChild(opt);
+    });
+    if (!f.unit && um[f.name]) {
+      mealEventFoods[i].unit = defaultUnit;
+    }
+    // quick amount buttons (unit-aware) — defined before onchange so it can be called inside
+    const quickRow = document.createElement('div');
+    quickRow.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap';
+
+    function quickValues(unit) {
+      if (unit === '粒')                           return [5,10,20,30,50];
+      if (['個','枚','本','杯','切れ'].includes(unit)) return [1,2,3,4,5,6];
+      return [50,100,150,200,250,300]; // g / ml / default
+    }
+
+    function buildQuickButtons() {
+      quickRow.innerHTML = '';
+      const curUnit = mealEventFoods[i].unit || unitSel.value || 'g';
+      quickValues(curUnit).forEach(v => {
+        const qb = document.createElement('button');
+        qb.textContent = v;
+        qb.style.cssText = 'padding:4px 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--card);font-size:12px;font-weight:700;cursor:pointer;color:var(--text-sub);font-family:Noto Sans JP,sans-serif;transition:all 0.15s';
+        qb.onclick = () => {
+          const unit = mealEventFoods[i].unit || unitSel.value || 'g';
+          mealEventFoods[i].amount  = v;
+          mealEventFoods[i].portion = null;
+          mealEventFoods[i].unit    = unit;
+          um[f.name] = unit; saveUnitMemory(um);
+          renderMealEventChips();
+        };
+        quickRow.appendChild(qb);
+      });
+    }
+
+    // single unified onchange: update state + memory + qBtn + quick buttons
+    unitSel.onchange = () => {
+      mealEventFoods[i].unit = unitSel.value;
+      um[f.name] = unitSel.value;
+      saveUnitMemory(um);
+      const amt = mealEventFoods[i].amount;
+      qBtn.textContent = amt != null ? amt + unitSel.value : '数量';
+      buildQuickButtons();
+    };
+
+    inputRow.appendChild(unitSel);
+    sec.appendChild(inputRow);
+
+    buildQuickButtons();
+    sec.appendChild(quickRow);
+    wrapper.appendChild(sec);
+
+    wrap.appendChild(wrapper);
   });
 }
 
@@ -2397,6 +2534,7 @@ function renderPhotoPreview() {
 
 // ===================== COPY PREV DAY =====================
 function copyPrevDay() {
+  data = loadData();  // ensure latest from localStorage
   const d = new Date(currentDate + 'T00:00:00');
   d.setDate(d.getDate()-1);
   const prevStr = localDateStr(d);
@@ -2588,7 +2726,11 @@ function buildDayText(dateStr) {
   lines.push(`■体重\n朝: ${r.weight.morning||'未入力'}kg\n夜: ${r.weight.evening||'未入力'}kg\n`);
   if (r.mealEvents && r.mealEvents.length) {
     const mealLines = r.mealEvents.map(ev => {
-      const foods = (ev.foods||[]).filter(f=>f.name).map(f=>f.name).join('、') || '未記入';
+      const foods = (ev.foods||[]).filter(f=>f.name).map(f => {
+        if (f.amount != null && f.amount !== '') return f.name + ' ' + f.amount + (f.unit||'');
+        if (f.portion) return f.name + '(' + f.portion.toUpperCase() + ')';
+        return f.name;
+      }).join('、') || '未記入';
       const t = ev.time ? ` (${ev.time})` : '';
       return `${ev.type||'食事'}${t}: ${foods}${ev.note?' / '+ev.note:''}`;
     });
