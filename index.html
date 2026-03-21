@@ -1271,7 +1271,13 @@
         <div id="mealEventChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:8px 10px;background:var(--bg);border:2px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px">
           <span id="mealEventChipHint" style="font-size:12px;color:var(--text-muted);font-style:italic">タップして選択 ↓</span>
         </div>
+        <!-- my foods section (always visible) -->
+        <div style="margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">★ よく使う食品</div>
+          <div id="myFoodsPresets" style="display:flex;flex-wrap:wrap;gap:7px;min-height:24px"></div>
+        </div>
         <!-- preset buttons -->
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">基本食品</div>
         <div id="mealEventPresets" style="display:flex;flex-wrap:wrap;gap:7px;max-height:140px;overflow-y:auto;padding-bottom:4px"></div>
         <!-- custom input -->
         <div style="display:flex;gap:8px;margin-top:10px">
@@ -1279,6 +1285,9 @@
             style="flex:1;padding:9px 13px;font-size:14px"
             onkeydown="if(event.key==='Enter'){addMealEventCustomFood();event.preventDefault()}">
           <button class="btn-save" onclick="addMealEventCustomFood()" style="flex:0;padding:9px 16px;font-size:13px">追加</button>
+        </div>
+        <div style="margin-top:6px">
+          <button onclick="saveToMyFoods()" style="width:100%;padding:7px;border-radius:var(--radius-sm);border:1.5px dashed var(--accent);background:transparent;color:var(--accent);font-family:'Noto Sans JP',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.15s">★ マイリストに保存</button>
         </div>
       </div>
 
@@ -1613,6 +1622,39 @@ const MEAL_PRESETS = [
   'サラダ','小鉢','野菜','スープ','クッキー','チョコレート','ヨーグルト',
   'ナッツ','フルーツ','アイスクリーム','その他'
 ];
+
+// ── my foods (user's personal list) ─────────────────────────────────────────
+const MY_FOODS_KEY = 'dietDiaryMyFoods';
+const MY_FOODS_MAX = 12;
+
+function loadMyFoods() {
+  try { return JSON.parse(localStorage.getItem(MY_FOODS_KEY)) || []; } catch { return []; }
+}
+function saveMyFoods(arr) {
+  localStorage.setItem(MY_FOODS_KEY, JSON.stringify(arr));
+}
+function saveToMyFoods() {
+  const input = document.getElementById('mealEventCustomInput');
+  const name = input.value.trim();
+  if (!name) { showToast('食品名を入力してください'); return; }
+  const list = loadMyFoods();
+  if (list.includes(name)) { showToast('すでにマイリストにあります'); return; }
+  if (list.length >= MY_FOODS_MAX) { showToast('マイリストは最大' + MY_FOODS_MAX + '個です'); return; }
+  list.push(name);
+  saveMyFoods(list);
+  // also add to current meal
+  if (!mealEventFoods.some(f => f.name === name)) {
+    mealEventFoods.push({ name, portion: '', amount: null, unit: null });
+    renderMealEventChips();
+  }
+  input.value = '';
+  buildMealEventPresets();
+  showToast('「' + name + '」をマイリストに保存しました');
+}
+function removeFromMyFoods(name) {
+  saveMyFoods(loadMyFoods().filter(n => n !== name));
+  buildMealEventPresets();
+}
 
 const STORAGE_KEY = 'dietDiaryData';
 
@@ -2081,6 +2123,38 @@ function selectMealEventType(btn, val) {
 }
 
 function buildMealEventPresets() {
+  // ── my foods ──────────────────────────────────────────────────────────
+  const myList = loadMyFoods();
+  const myContainer = document.getElementById('myFoodsPresets');
+  if (myContainer) {
+    myContainer.innerHTML = '';
+    if (!myList.length) {
+      const hint = document.createElement('span');
+      hint.textContent = 'まだ登録がありません';
+      hint.style.cssText = 'font-size:12px;color:var(--text-muted);font-style:italic';
+      myContainer.appendChild(hint);
+    } else {
+      myList.forEach(name => {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:relative;display:inline-block';
+        const btn = document.createElement('button');
+        btn.className = 'meal-preset-tag' + (mealEventFoods.some(f => f.name === name) ? ' selected' : '');
+        btn.style.paddingRight = '20px';
+        btn.textContent = name;
+        btn.onclick = () => toggleMealEventPreset(name, btn);
+        const del = document.createElement('button');
+        del.textContent = '×';
+        del.title = 'マイリストから削除';
+        del.style.cssText = 'position:absolute;top:-4px;right:-4px;width:15px;height:15px;border-radius:50%;border:none;background:#c04040;color:white;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1';
+        del.onclick = e => { e.stopPropagation(); removeFromMyFoods(name); };
+        wrap.appendChild(btn);
+        wrap.appendChild(del);
+        myContainer.appendChild(wrap);
+      });
+    }
+  }
+
+  // ── basic presets (unchanged) ──────────────────────────────────────────
   const container = document.getElementById('mealEventPresets');
   container.innerHTML = '';
   MEAL_PRESETS.forEach(name => {
