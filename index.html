@@ -274,7 +274,6 @@
   .cat-btn.toilet::before  { background: #b8d47e; }
   .cat-btn.water::before   { background: #7ed4e8; }
   .cat-btn.condition::before{ background: var(--pink); }
-  .cat-btn.photo::before   { background: #e8c27e; }
   .cat-btn.graph::before   { background: var(--accent); }
   .cat-btn.export::before  { background: var(--primary); }
   .cat-btn.settings::before{ background: var(--text-muted); }
@@ -684,54 +683,6 @@
     transform: translateX(-50%) translateY(0);
   }
 
-  /* ===== PHOTO SECTION ===== */
-  .photo-preview {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 10px;
-  }
-
-  .photo-thumb {
-    width: 72px;
-    height: 72px;
-    border-radius: 10px;
-    object-fit: cover;
-    border: 2px solid var(--border);
-    position: relative;
-  }
-
-  .photo-thumb-wrap {
-    position: relative;
-    display: inline-block;
-  }
-
-  .photo-del-btn {
-    position: absolute;
-    top: -6px; right: -6px;
-    width: 20px; height: 20px;
-    border-radius: 50%;
-    background: #e84040;
-    color: white;
-    border: none;
-    font-size: 12px;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    line-height: 1;
-  }
-
-  .photo-add-btn {
-    width: 72px; height: 72px;
-    border-radius: 10px;
-    border: 2px dashed var(--border);
-    background: var(--bg);
-    color: var(--text-muted);
-    font-size: 28px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
 
   /* meal tabs */
   .meal-tabs {
@@ -1202,11 +1153,6 @@
         <div class="cat-btn-label">体調</div>
         <div class="cat-btn-dot" id="dot-condition" style="display:none"></div>
       </button>
-      <button class="cat-btn photo" onclick="openModal('photo')">
-        <img src="images/image_9.jpg" alt="写真" onerror="this.style.display='none'">
-        <div class="cat-btn-label">写真</div>
-        <div class="cat-btn-dot" id="dot-photo" style="display:none"></div>
-      </button>
       <button class="cat-btn graph" onclick="openModal('graph')">
         <img src="images/image_10.jpg" alt="グラフ" onerror="this.style.display='none'">
         <div class="cat-btn-label">グラフ</div>
@@ -1579,26 +1525,6 @@
   </div>
 </div>
 
-<!-- PHOTO MODAL -->
-<div class="modal-overlay" id="modal-photo">
-  <div class="modal">
-    <div class="modal-handle"></div>
-    <div class="modal-title">
-      <img src="images/image_9.jpg" onerror="this.style.display='none'"> 写真
-    </div>
-    <div class="form-group">
-      <label class="form-label">写真を追加（最大5枚）</label>
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">※ローカルに保存されます（容量に注意）</p>
-      <div class="photo-preview" id="photoPreview"></div>
-      <input type="file" accept="image/*" id="photoInput" style="display:none" onchange="addPhoto(event)" multiple>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModal('photo')">閉じる</button>
-      <button class="btn-save" onclick="savePhoto()">保存</button>
-    </div>
-  </div>
-</div>
-
 <!-- GRAPH MODAL -->
 <div class="modal-overlay" id="modal-graph">
   <div class="modal">
@@ -1697,7 +1623,6 @@ let currentExportTab = 'day';
 let graphModalChart = null;
 let weekChartInst = null;
 let monthChartInst = null;
-let tempPhotos = [];
 
 // meal event state
 let mealEventFoods = [];   // [{name, portion}]
@@ -1751,7 +1676,6 @@ function getRecord(dateStr) {
       water: { intake: '' },
       exercise: { types: [], duration: '', note: '' },
       condition: { tags: [], memo: '' },
-      photos: [],
       updatedAt: ''
     };
   }
@@ -1892,7 +1816,6 @@ function renderStatusGrid(rec) {
     { label: 'トイレ', done: !!(rec.toilet.bowelCount) },
     { label: '水分',   done: !!(rec.water.intake) },
     { label: '体調',   done: !!(rec.condition.tags.length || rec.condition.memo) },
-    { label: '写真',   done: rec.photos.length > 0 },
   ];
   const grid = document.getElementById('statusGrid');
   grid.innerHTML = items.map(i =>
@@ -1916,7 +1839,6 @@ function updateDots(rec) {
     'toilet': !!(rec.toilet.bowelCount),
     'water': !!(rec.water.intake),
     'condition': !!(rec.condition.tags.length || rec.condition.memo),
-    'photo': rec.photos.length > 0,
   };
   Object.entries(map).forEach(([k, v]) => {
     const dot = document.getElementById(`dot-${k}`);
@@ -1973,10 +1895,6 @@ function openModal(type) {
       btn.classList.toggle('selected', rec.condition.tags.includes(btn.textContent));
     });
     document.getElementById('condMemo').value = rec.condition.memo || '';
-  }
-  if (type === 'photo') {
-    tempPhotos = [...(rec.photos||[])];
-    renderPhotoPreview();
   }
   if (type === 'graph') {
     currentGraphDays = '7';
@@ -2477,59 +2395,6 @@ function saveCondition() {
   renderDay();
   closeModal('condition');
   showToast('体調を保存しました');
-}
-
-function savePhoto() {
-  const rec = getRecord(currentDate);
-  rec.photos = tempPhotos;
-  rec.updatedAt = new Date().toISOString();
-  saveData();
-  renderDay();
-  closeModal('photo');
-  showToast('写真を保存しました');
-}
-
-// ===================== PHOTO =====================
-function addPhoto(event) {
-  const files = event.target.files;
-  if (!files.length) return;
-  if (tempPhotos.length >= 5) { showToast('写真は最大5枚です'); return; }
-  Array.from(files).forEach(file => {
-    if (tempPhotos.length >= 5) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-      tempPhotos.push(e.target.result);
-      renderPhotoPreview();
-    };
-    reader.readAsDataURL(file);
-  });
-  event.target.value = '';
-}
-
-function renderPhotoPreview() {
-  const container = document.getElementById('photoPreview');
-  container.innerHTML = '';
-  tempPhotos.forEach((src, i) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'photo-thumb-wrap';
-    const img = document.createElement('img');
-    img.className = 'photo-thumb';
-    img.src = src;
-    const del = document.createElement('button');
-    del.className = 'photo-del-btn';
-    del.textContent = '×';
-    del.onclick = () => { tempPhotos.splice(i,1); renderPhotoPreview(); };
-    wrap.appendChild(img);
-    wrap.appendChild(del);
-    container.appendChild(wrap);
-  });
-  if (tempPhotos.length < 5) {
-    const add = document.createElement('button');
-    add.className = 'photo-add-btn';
-    add.textContent = '+';
-    add.onclick = () => document.getElementById('photoInput').click();
-    container.appendChild(add);
-  }
 }
 
 // ===================== COPY PREV DAY =====================
