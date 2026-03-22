@@ -1047,6 +1047,85 @@
     font-weight: 600;
     color: var(--text-sub);
   }
+
+  /* ===== TOILET EVENT CARDS ===== */
+  .toilet-event-card {
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 11px 13px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .toilet-event-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex: 1;
+  }
+  .toilet-event-type {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .toilet-event-time {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .toilet-event-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: #edfaf4;
+    color: #2a9d6a;
+    border: 1px solid #b0e8cc;
+  }
+  .toilet-event-del {
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 2px solid var(--border);
+    background: var(--card);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    color: var(--text-sub);
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .toilet-event-del:active { background: #e84040; border-color: #e84040; color: white; }
+  .toilet-sub-form {
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .toilet-type-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .toilet-type-btn {
+    flex: 1;
+    padding: 10px 8px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border);
+    background: var(--bg);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+    color: var(--text-sub);
+  }
+  .toilet-type-btn.active-bowel    { border-color: #b8d47e; background: #f2fadf; color: #5a7a2a; }
+  .toilet-type-btn.active-urination{ border-color: #7ed4e8; background: #e0f7fc; color: #2a7a8a; }
 </style>
 </head>
 <body>
@@ -1109,6 +1188,15 @@
         <button class="inline-add-meal-btn" onclick="openModal('meal')">＋ 追加・編集</button>
       </div>
       <div id="inlineMealFeed"></div>
+    </div>
+
+    <!-- Inline Toilet Feed -->
+    <div class="inline-meals-section" id="inlineToiletSection" style="display:none">
+      <div class="inline-meals-header">
+        <div class="inline-meals-title">🚻 トイレ記録</div>
+        <button class="inline-add-meal-btn" onclick="openModal('toilet')" style="background:var(--accent-light);color:var(--accent)">＋ 追加・編集</button>
+      </div>
+      <div id="inlineToiletFeed"></div>
     </div>
 
     <!-- Category Grid -->
@@ -1276,7 +1364,7 @@
           <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">★ よく使う食品</div>
           <div id="myFoodsPresets" style="display:flex;flex-wrap:wrap;gap:7px;min-height:24px"></div>
         </div>
-        <!-- preset buttons -->
+        <!-- basic presets -->
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">基本食品</div>
         <div id="mealEventPresets" style="display:flex;flex-wrap:wrap;gap:7px;max-height:140px;overflow-y:auto;padding-bottom:4px"></div>
         <!-- custom input -->
@@ -1434,45 +1522,77 @@
   </div>
 </div>
 
-<!-- TOILET MODAL -->
+<!-- TOILET MODAL (event-based) -->
 <div class="modal-overlay" id="modal-toilet">
   <div class="modal">
     <div class="modal-handle"></div>
     <div class="modal-title">
       <img src="images/image_6.jpg" onerror="this.style.display='none'"> トイレ
     </div>
-    <div class="form-group">
-      <label class="form-label">排便回数</label>
-      <div class="option-group">
-        <button class="option-btn" onclick="selectOption(this,'toiletBowelCount','なし')">なし</button>
-        <button class="option-btn" onclick="selectOption(this,'toiletBowelCount','1回')">1回</button>
-        <button class="option-btn" onclick="selectOption(this,'toiletBowelCount','2回')">2回</button>
-        <button class="option-btn" onclick="selectOption(this,'toiletBowelCount','3回以上')">3回以上</button>
+
+    <!-- Event list -->
+    <div id="toiletEventList"></div>
+
+    <!-- Add event button -->
+    <button class="tag-btn" id="addToiletEventBtn" onclick="startNewToiletEvent()"
+      style="width:100%;border-radius:var(--radius-sm);padding:12px;font-size:14px;margin-bottom:4px">
+      ＋ トイレを記録
+    </button>
+
+    <!-- Sub-form -->
+    <div id="toiletEventForm" style="display:none;margin-top:14px;border-top:2px solid var(--border);padding-top:14px">
+
+      <!-- Type selector -->
+      <div class="form-group">
+        <label class="form-label">種類</label>
+        <div class="toilet-type-row">
+          <button class="toilet-type-btn" id="toiletTypeBowel" onclick="selectToiletType('bowel')">💩 排便</button>
+          <button class="toilet-type-btn" id="toiletTypeUrine" onclick="selectToiletType('urination')">💧 排尿</button>
+        </div>
       </div>
-      <input type="hidden" id="toiletBowelCount">
-    </div>
-    <div class="form-group">
-      <label class="form-label">状態</label>
-      <div class="option-group">
-        <button class="option-btn" onclick="selectOption(this,'toiletBowelCond','硬め')">硬め</button>
-        <button class="option-btn" onclick="selectOption(this,'toiletBowelCond','普通')">普通</button>
-        <button class="option-btn" onclick="selectOption(this,'toiletBowelCond','やや軟')">やや軟</button>
-        <button class="option-btn" onclick="selectOption(this,'toiletBowelCond','軟便')">軟便</button>
+
+      <!-- Bowel options (shown when type=bowel) -->
+      <div id="toiletBowelOptions" style="display:none">
+        <div class="form-group">
+          <label class="form-label">状態</label>
+          <div class="option-group">
+            <button class="option-btn" onclick="selectOption(this,'toiletCondVal','硬め')">硬め</button>
+            <button class="option-btn" onclick="selectOption(this,'toiletCondVal','普通')">普通</button>
+            <button class="option-btn" onclick="selectOption(this,'toiletCondVal','やや軟')">やや軟</button>
+            <button class="option-btn" onclick="selectOption(this,'toiletCondVal','軟便')">軟便</button>
+          </div>
+          <input type="hidden" id="toiletCondVal">
+        </div>
       </div>
-      <input type="hidden" id="toiletBowelCond">
-    </div>
-    <div class="form-group">
-      <label class="form-label">排尿</label>
-      <div class="option-group">
-        <button class="option-btn" onclick="selectOption(this,'toiletUrine','少ない')">少ない</button>
-        <button class="option-btn" onclick="selectOption(this,'toiletUrine','普通')">普通</button>
-        <button class="option-btn" onclick="selectOption(this,'toiletUrine','多い')">多い</button>
+
+      <!-- Urination options (shown when type=urination) -->
+      <div id="toiletUrineOptions" style="display:none">
+        <div class="form-group">
+          <label class="form-label">量</label>
+          <div class="option-group">
+            <button class="option-btn" onclick="selectOption(this,'toiletVolVal','少ない')">少ない</button>
+            <button class="option-btn" onclick="selectOption(this,'toiletVolVal','普通')">普通</button>
+            <button class="option-btn" onclick="selectOption(this,'toiletVolVal','多い')">多い</button>
+          </div>
+          <input type="hidden" id="toiletVolVal">
+        </div>
       </div>
-      <input type="hidden" id="toiletUrine">
+
+      <!-- Time -->
+      <div class="form-group">
+        <label class="form-label">時刻（任意）</label>
+        <input type="time" class="form-input" id="toiletEventTime">
+      </div>
+
+      <!-- Sub-form actions -->
+      <div style="display:flex;gap:8px">
+        <button class="btn-cancel" onclick="cancelToiletEventForm()" style="flex:1">キャンセル</button>
+        <button class="btn-save" onclick="saveToiletEvent()" style="flex:2">保存</button>
+      </div>
     </div>
+
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModal('toilet')">閉じる</button>
-      <button class="btn-save" onclick="saveToilet()">保存</button>
+      <button class="btn-save" onclick="closeModal('toilet')">閉じる</button>
     </div>
   </div>
 </div>
@@ -1605,6 +1725,17 @@
       </div>
       <button class="settings-btn danger" onclick="clearAllData()">削除</button>
     </div>
+    <!-- My Foods management -->
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bg)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div>
+          <div class="settings-label">よく使う食品（マイリスト）</div>
+          <div class="settings-sub">登録済みの食品を確認・削除できます</div>
+        </div>
+        <button class="settings-btn danger" onclick="clearMyFoods()">全削除</button>
+      </div>
+      <div id="settingsMyFoodsList" style="display:flex;flex-wrap:wrap;gap:6px;min-height:24px"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn-save" onclick="closeModal('settings')">閉じる</button>
     </div>
@@ -1642,7 +1773,6 @@ function saveToMyFoods() {
   if (list.length >= MY_FOODS_MAX) { showToast('マイリストは最大' + MY_FOODS_MAX + '個です'); return; }
   list.push(name);
   saveMyFoods(list);
-  // also add to current meal
   if (!mealEventFoods.some(f => f.name === name)) {
     mealEventFoods.push({ name, portion: '', amount: null, unit: null });
     renderMealEventChips();
@@ -1714,7 +1844,8 @@ function getRecord(dateStr) {
       },
       alcohol: { hasAlcohol: null, types: [], cups: '', place: '', note: '' },
       sleep: { bedTime: '', wakeTime: '', hours: '' },
-      toilet: { bowelCount: '', bowelCondition: '', urination: '' },
+      toilet: { bowelCount: '', bowelCondition: '', urination: '' },  // legacy
+      toiletEvents: [],
       water: { intake: '' },
       exercise: { types: [], duration: '', note: '' },
       condition: { tags: [], memo: '' },
@@ -1722,6 +1853,7 @@ function getRecord(dateStr) {
     };
   }
   if (!data[dateStr].mealEvents) data[dateStr].mealEvents = [];
+  if (!data[dateStr].toiletEvents) data[dateStr].toiletEvents = [];
   return data[dateStr];
 }
 
@@ -1800,6 +1932,9 @@ function renderDay() {
   // --- inline meal feed ---
   renderInlineMealFeed(rec);
 
+  // --- inline toilet feed ---
+  renderInlineToiletFeed(rec);
+
   // --- dots ---
   updateDots(rec);
 }
@@ -1842,6 +1977,35 @@ function renderInlineMealFeed(rec) {
   }).join('');
 }
 
+function renderInlineToiletFeed(rec) {
+  const events = (rec.toiletEvents || []).slice()
+    .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  const section = document.getElementById('inlineToiletSection');
+  const feed    = document.getElementById('inlineToiletFeed');
+  if (!section || !feed) return;
+
+  if (!events.length) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  const typeLabel = { bowel: '排便', urination: '排尿' };
+  feed.innerHTML = events.map(ev => {
+    const tl      = typeLabel[ev.type] || ev.type;
+    const timeStr = ev.time ? '<span class="inline-meal-time">' + ev.time + '</span>' : '';
+    const detail  = ev.type === 'bowel'
+      ? (ev.condition ? '<span class="inline-food-portion ifp-s" style="background:#edfaf4;color:#2a9d6a;border:1px solid #b0e8cc">' + ev.condition + '</span>' : '')
+      : (ev.volume    ? '<span class="inline-food-portion ifp-s" style="background:#e0f7fc;color:#2a7a8a;border:1px solid #9fd8e8">'   + ev.volume    + '</span>' : '');
+    return '<div class="inline-meal-card" style="border-left-color:var(--accent)">'
+      + '<div class="inline-meal-top">'
+      +   '<div><span class="inline-meal-type">' + tl + '</span>' + timeStr + ' ' + detail + '</div>'
+      +   '<button class="inline-meal-edit-btn" onclick="openModal(&apos;toilet&apos;)">編集</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
 function openMealModalAndEdit(id) {
   openModal('meal');
   // slight delay to let modal open first
@@ -1855,7 +2019,7 @@ function renderStatusGrid(rec) {
     { label: '飲酒',   done: rec.alcohol.hasAlcohol !== null },
     { label: '運動',   done: !!(rec.exercise.types && rec.exercise.types.length) },
     { label: '睡眠',   done: !!(rec.sleep.bedTime || rec.sleep.wakeTime) },
-    { label: 'トイレ', done: !!(rec.toilet.bowelCount) },
+    { label: 'トイレ', done: !!(rec.toiletEvents && rec.toiletEvents.length) || !!(rec.toilet && rec.toilet.bowelCount) },
     { label: '水分',   done: !!(rec.water.intake) },
     { label: '体調',   done: !!(rec.condition.tags.length || rec.condition.memo) },
   ];
@@ -1878,7 +2042,7 @@ function updateDots(rec) {
     'alcohol': rec.alcohol.hasAlcohol !== null,
     'exercise': !!(rec.exercise.types && rec.exercise.types.length),
     'sleep': !!(rec.sleep.bedTime || rec.sleep.wakeTime),
-    'toilet': !!(rec.toilet.bowelCount),
+    'toilet': !!(rec.toiletEvents && rec.toiletEvents.length) || !!(rec.toilet && rec.toilet.bowelCount),
     'water': !!(rec.water.intake),
     'condition': !!(rec.condition.tags.length || rec.condition.memo),
   };
@@ -1925,9 +2089,8 @@ function openModal(type) {
     document.getElementById('sleepHours').value = rec.sleep.hours || '';
   }
   if (type === 'toilet') {
-    restoreOption('modal-toilet', 'toiletBowelCount', rec.toilet.bowelCount);
-    restoreOption('modal-toilet', 'toiletBowelCond', rec.toilet.bowelCondition);
-    restoreOption('modal-toilet', 'toiletUrine', rec.toilet.urination);
+    renderToiletEventList();
+    hideToiletEventForm();
   }
   if (type === 'water') {
     restoreOption('modal-water', 'waterIntake', rec.water.intake);
@@ -1947,6 +2110,9 @@ function openModal(type) {
     currentExportTab = 'day';
     document.querySelectorAll('.export-tab').forEach((t,i) => t.classList.toggle('active', i===0));
     renderExport();
+  }
+  if (type === 'settings') {
+    renderSettingsMyFoods();
   }
 
   document.getElementById(`modal-${type}`).classList.add('open');
@@ -2154,7 +2320,7 @@ function buildMealEventPresets() {
     }
   }
 
-  // ── basic presets (unchanged) ──────────────────────────────────────────
+  // ── basic presets ──────────────────────────────────────────────────────
   const container = document.getElementById('mealEventPresets');
   container.innerHTML = '';
   MEAL_PRESETS.forEach(name => {
@@ -2436,17 +2602,103 @@ function saveSleep() {
   showToast('睡眠を保存しました');
 }
 
-function saveToilet() {
+// ===================== TOILET EVENTS =====================
+let editingToiletType = null;  // 'bowel' | 'urination'
+
+function renderToiletEventList() {
   const rec = getRecord(currentDate);
-  rec.toilet.bowelCount = document.getElementById('toiletBowelCount').value;
-  rec.toilet.bowelCondition = document.getElementById('toiletBowelCond').value;
-  rec.toilet.urination = document.getElementById('toiletUrine').value;
+  const events = (rec.toiletEvents || []).slice().sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+  const container = document.getElementById('toiletEventList');
+  if (!events.length) {
+    container.innerHTML = '<div style="text-align:center;padding:14px 0 10px;color:var(--text-muted);font-size:13px">まだ記録がありません</div>';
+    return;
+  }
+  const typeLabel = { bowel:'排便', urination:'排尿' };
+  container.innerHTML = events.map(ev => {
+    const timeStr = ev.time ? `<span class="toilet-event-time">${ev.time}</span>` : '';
+    const detail = ev.type === 'bowel'
+      ? (ev.condition ? `<span class="toilet-event-badge">${ev.condition}</span>` : '')
+      : (ev.volume   ? `<span class="toilet-event-badge">${ev.volume}</span>`    : '');
+    return `<div class="toilet-event-card">
+      <div class="toilet-event-info">
+        <span class="toilet-event-type">${typeLabel[ev.type]||ev.type}</span>
+        ${timeStr}${detail}
+      </div>
+      <button class="toilet-event-del" onclick="deleteToiletEvent('${ev.id}')">削除</button>
+    </div>`;
+  }).join('');
+}
+
+function startNewToiletEvent() {
+  editingToiletType = null;
+  document.getElementById('toiletTypeBowel').className    = 'toilet-type-btn';
+  document.getElementById('toiletTypeUrine').className    = 'toilet-type-btn';
+  document.getElementById('toiletBowelOptions').style.display = 'none';
+  document.getElementById('toiletUrineOptions').style.display = 'none';
+  restoreOption('', 'toiletCondVal', '');
+  restoreOption('', 'toiletVolVal',  '');
+  const now = new Date();
+  document.getElementById('toiletEventTime').value =
+    String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  document.getElementById('toiletEventForm').style.display = 'block';
+  document.getElementById('addToiletEventBtn').style.display = 'none';
+}
+
+function selectToiletType(type) {
+  editingToiletType = type;
+  document.getElementById('toiletTypeBowel').className =
+    'toilet-type-btn' + (type === 'bowel'     ? ' active-bowel'     : '');
+  document.getElementById('toiletTypeUrine').className =
+    'toilet-type-btn' + (type === 'urination' ? ' active-urination' : '');
+  document.getElementById('toiletBowelOptions').style.display = type === 'bowel'     ? 'block' : 'none';
+  document.getElementById('toiletUrineOptions').style.display = type === 'urination' ? 'block' : 'none';
+}
+
+function cancelToiletEventForm() {
+  hideToiletEventForm();
+}
+
+function hideToiletEventForm() {
+  document.getElementById('toiletEventForm').style.display = 'none';
+  document.getElementById('addToiletEventBtn').style.display = '';
+}
+
+// legacy save (kept for any old references)
+function saveToilet() {
+  saveToiletEvent();
+}
+
+function saveToiletEvent() {
+  if (!editingToiletType) { showToast('種類を選択してください'); return; }
+  const time = document.getElementById('toiletEventTime').value;
+  const ev = { id: uid(), type: editingToiletType, time };
+  if (editingToiletType === 'bowel') {
+    ev.condition = document.getElementById('toiletCondVal').value || '';
+  } else {
+    ev.volume = document.getElementById('toiletVolVal').value || '';
+  }
+  const rec = getRecord(currentDate);
+  rec.toiletEvents.push(ev);
   rec.updatedAt = new Date().toISOString();
   saveData();
   renderDay();
-  closeModal('toilet');
-  showToast('トイレを保存しました');
+  hideToiletEventForm();
+  renderToiletEventList();
+  showToast('トイレを記録しました');
 }
+
+function deleteToiletEvent(id) {
+  if (!confirm('この記録を削除しますか？')) return;
+  const rec = getRecord(currentDate);
+  rec.toiletEvents = rec.toiletEvents.filter(e => e.id !== id);
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  renderToiletEventList();
+  showToast('削除しました');
+}
+
+// legacy save (kept for any old references)
 
 function saveWater() {
   const rec = getRecord(currentDate);
@@ -2592,11 +2844,15 @@ function renderWeekView() {
   const drinkDays = recs.filter(r => r.alcohol.hasAlcohol === true).length;
   const exDays = recs.filter(r => r.exercise.types && r.exercise.types.length && !r.exercise.types.includes('なし')).length;
   const avgW = weights.length ? (weights.reduce((a,b)=>a+b,0)/weights.length).toFixed(1) : '---';
+  const bowelTotal  = recs.reduce((s, r) => s + (r.toiletEvents || []).filter(e => e.type === 'bowel').length, 0);
+  const urineTotal  = recs.reduce((s, r) => s + (r.toiletEvents || []).filter(e => e.type === 'urination').length, 0);
   document.getElementById('weekStats').innerHTML = `
     <div class="stat-row"><span class="stat-label">期間</span><span class="stat-value">${start} 〜 ${end}</span></div>
     <div class="stat-row"><span class="stat-label">平均体重</span><span class="stat-value">${avgW}${avgW!=='---'?'kg':''}</span></div>
     <div class="stat-row"><span class="stat-label">飲酒日数</span><span class="stat-value">${drinkDays}日</span></div>
     <div class="stat-row"><span class="stat-label">運動日数</span><span class="stat-value">${exDays}日</span></div>
+    <div class="stat-row"><span class="stat-label">排便回数</span><span class="stat-value">${bowelTotal}回</span></div>
+    <div class="stat-row"><span class="stat-label">排尿回数</span><span class="stat-value">${urineTotal}回</span></div>
     <div class="stat-row"><span class="stat-label">記録日数</span><span class="stat-value">${recs.length}日</span></div>
   `;
   // chart
@@ -2620,6 +2876,9 @@ function renderMonthView() {
   const avgW = weights.length ? (weights.reduce((a,b)=>a+b,0)/weights.length).toFixed(1) : '---';
   const minW = weights.length ? Math.min(...weights).toFixed(1) : '---';
   const maxW = weights.length ? Math.max(...weights).toFixed(1) : '---';
+  const bowelTotal  = recs.reduce((s, r) => s + (r.toiletEvents || []).filter(e => e.type === 'bowel').length, 0);
+  const urineTotal  = recs.reduce((s, r) => s + (r.toiletEvents || []).filter(e => e.type === 'urination').length, 0);
+  const avgBowel    = recs.length ? (bowelTotal / recs.length).toFixed(1) : '---';
   document.getElementById('monthStats').innerHTML = `
     <div class="stat-row"><span class="stat-label">期間</span><span class="stat-value">${start} 〜 ${end}</span></div>
     <div class="stat-row"><span class="stat-label">平均体重</span><span class="stat-value">${avgW}${avgW!=='---'?'kg':''}</span></div>
@@ -2627,6 +2886,9 @@ function renderMonthView() {
     <div class="stat-row"><span class="stat-label">最高体重</span><span class="stat-value">${maxW}${maxW!=='---'?'kg':''}</span></div>
     <div class="stat-row"><span class="stat-label">飲酒日数</span><span class="stat-value">${drinkDays}日</span></div>
     <div class="stat-row"><span class="stat-label">運動日数</span><span class="stat-value">${exDays}日</span></div>
+    <div class="stat-row"><span class="stat-label">排便合計</span><span class="stat-value">${bowelTotal}回</span></div>
+    <div class="stat-row"><span class="stat-label">排便/日（平均）</span><span class="stat-value">${avgBowel}回</span></div>
+    <div class="stat-row"><span class="stat-label">排尿合計</span><span class="stat-value">${urineTotal}回</span></div>
     <div class="stat-row"><span class="stat-label">記録日数</span><span class="stat-value">${recs.length}日</span></div>
   `;
   if (monthChartInst) monthChartInst.destroy();
@@ -2686,8 +2948,21 @@ function buildDayText(dateStr) {
   if (r.sleep.bedTime || r.sleep.wakeTime) {
     lines.push(`■睡眠\n就寝: ${r.sleep.bedTime||'---'}\n起床: ${r.sleep.wakeTime||'---'}${r.sleep.hours?'\n'+r.sleep.hours:''}\n`);
   }
-  if (r.toilet.bowelCount) {
-    lines.push(`■トイレ\n排便: ${r.toilet.bowelCount} / ${r.toilet.bowelCondition||''}\n排尿: ${r.toilet.urination||''}\n`);
+  const tevents = r.toiletEvents || [];
+  if (tevents.length) {
+    const tlines = tevents
+      .slice().sort((a, b) => (a.time || '').localeCompare(b.time || ''))
+      .map(e => {
+        const typeLabel = e.type === 'bowel' ? '排便' : '排尿';
+        const timeStr   = e.time ? e.time + ' ' : '';
+        const detail    = e.type === 'bowel'
+          ? (e.condition ? ' (' + e.condition + ')' : '')
+          : (e.volume    ? ' (' + e.volume    + ')' : '');
+        return timeStr + typeLabel + detail;
+      });
+    lines.push('■トイレ\n' + tlines.join('\n') + '\n');
+  } else if (r.toilet && r.toilet.bowelCount) {
+    lines.push('■トイレ\n排便: ' + r.toilet.bowelCount + ' / ' + (r.toilet.bowelCondition || '') + '\n排尿: ' + (r.toilet.urination || '') + '\n');
   }
   if (r.water.intake) lines.push(`■水分\n${r.water.intake}\n`);
   if (r.condition.tags.length || r.condition.memo) {
@@ -2729,7 +3004,14 @@ function copyExportText() {
 
 // ===================== SETTINGS =====================
 function exportJSON() {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const backup = {
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    data:       data,
+    myFoods:    loadMyFoods(),
+    unitMemory: loadUnitMemory()
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `diet_diary_backup_${todayStr()}.json`;
@@ -2744,24 +3026,67 @@ function importJSON(event) {
   reader.onload = e => {
     try {
       const imported = JSON.parse(e.target.result);
-      if (confirm('データを上書きインポートしますか？')) {
+      if (!confirm('データを上書きインポートしますか？')) return;
+
+      if (imported.version === 2) {
+        // new format: bundled backup
+        data = imported.data || {};
+        if (imported.myFoods)    saveMyFoods(imported.myFoods);
+        if (imported.unitMemory) saveUnitMemory(imported.unitMemory);
+      } else {
+        // legacy format: data only
         data = imported;
-        saveData();
-        renderDay();
-        showToast('データをインポートしました');
       }
+
+      saveData();
+      renderDay();
+      showToast('データをインポートしました');
     } catch { showToast('ファイルが正しくありません'); }
   };
   reader.readAsText(file);
   event.target.value = '';
 }
 
+function renderSettingsMyFoods() {
+  const list = loadMyFoods();
+  const container = document.getElementById('settingsMyFoodsList');
+  if (!container) return;
+  if (!list.length) {
+    container.innerHTML = '<span style="font-size:12px;color:var(--text-muted);font-style:italic">まだ登録がありません</span>';
+    return;
+  }
+  container.innerHTML = '';
+  list.forEach(name => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block';
+    const tag = document.createElement('span');
+    tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px 5px 10px;border-radius:20px;border:1.5px solid var(--border);background:var(--bg);font-size:12px;font-weight:600;color:var(--text-sub)';
+    tag.textContent = name;
+    const del = document.createElement('button');
+    del.textContent = '×';
+    del.style.cssText = 'margin-left:4px;width:16px;height:16px;border-radius:50%;border:none;background:#c04040;color:white;font-size:9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;line-height:1;flex-shrink:0';
+    del.onclick = () => { removeFromMyFoods(name); renderSettingsMyFoods(); };
+    tag.appendChild(del);
+    wrap.appendChild(tag);
+    container.appendChild(wrap);
+  });
+}
+
+function clearMyFoods() {
+  if (!confirm('マイリストをすべて削除しますか？')) return;
+  saveMyFoods([]);
+  renderSettingsMyFoods();
+  showToast('マイリストを削除しました');
+}
+
 function clearAllData() {
-  if (confirm('すべてのデータを削除します。元に戻せません。よろしいですか？')) {
+  if (confirm('すべてのデータを削除します。\nマイ食品・単位メモリも含めて完全に削除されます。\n元に戻せません。よろしいですか？')) {
     data = {};
     saveData();
+    saveMyFoods([]);
+    saveUnitMemory({});
     renderDay();
-    showToast('データを削除しました');
+    showToast('すべてのデータを削除しました');
   }
 }
 
