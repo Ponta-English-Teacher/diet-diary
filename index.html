@@ -1408,41 +1408,67 @@
       </div>
     </div>
     <div id="alcDetails" style="display:none">
-      <div class="form-group">
-        <label class="form-label">種類（複数選択可）</label>
-        <div class="tag-group">
-          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">ビール</button>
-          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">ハイボール</button>
-          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">焼酎</button>
-          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">ワイン</button>
-          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">ウイスキー</button>
-          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">カクテル</button>
-          <button class="tag-btn" onclick="toggleTag(this, 'alcTypes')">その他</button>
+
+      <!-- List of already-added drinks for the day -->
+      <div id="alcoholEventList"></div>
+
+      <!-- Add drink button -->
+      <button class="tag-btn" id="addAlcoholEventBtn" onclick="startNewAlcoholEvent()"
+        style="width:100%;border-radius:var(--radius-sm);padding:12px;font-size:14px;margin-bottom:4px">
+        ＋ 飲み物を追加
+      </button>
+
+      <!-- Sub-form: add one drink -->
+      <div id="alcoholEventForm" style="display:none;margin-top:14px;border-top:2px solid var(--border);padding-top:14px">
+
+        <div class="form-group">
+          <label class="form-label">種類</label>
+          <div class="option-group" id="alcTypeGroup">
+            <button class="option-btn" onclick="selectAlcoholEventType(this,'shochu')">焼酎</button>
+            <button class="option-btn" onclick="selectAlcoholEventType(this,'beer')">ビール</button>
+            <button class="option-btn" onclick="selectAlcoholEventType(this,'whiskey')">ウイスキー</button>
+            <button class="option-btn" onclick="selectAlcoholEventType(this,'gin')">ジン</button>
+            <button class="option-btn" onclick="selectAlcoholEventType(this,'wine')">ワイン</button>
+            <button class="option-btn" onclick="selectAlcoholEventType(this,'other')">その他</button>
+          </div>
+          <input type="hidden" id="alcoholEventType">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">杯数</label>
+          <div class="option-group" id="alcCountQuick">
+            <button class="option-btn" onclick="setAlcoholEventCount(1)">1</button>
+            <button class="option-btn" onclick="setAlcoholEventCount(2)">2</button>
+            <button class="option-btn" onclick="setAlcoholEventCount(3)">3</button>
+            <button class="option-btn" onclick="setAlcoholEventCount(4)">4</button>
+          </div>
+          <input type="number" class="form-input" id="alcoholEventCount" min="1" step="1" placeholder="杯数を入力（例: 5）"
+            style="margin-top:8px" oninput="onAlcoholEventCountInput()">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">単位</label>
+          <div class="option-group" id="alcUnitGroup">
+            <button class="option-btn" onclick="selectAlcoholEventUnit(this,'glass')">グラス</button>
+            <button class="option-btn" onclick="selectAlcoholEventUnit(this,'cup')">カップ</button>
+          </div>
+          <input type="hidden" id="alcoholEventUnit" value="glass">
+        </div>
+
+        <div id="alcoholEventEstimate" style="font-size:13px;font-weight:700;color:var(--text-sub);margin-bottom:14px"></div>
+
+        <div style="display:flex;gap:8px">
+          <button class="btn-cancel" onclick="cancelAlcoholEventForm()" style="flex:1">キャンセル</button>
+          <button class="btn-save" onclick="saveAlcoholEvent()" id="alcoholEventSaveBtn" style="flex:2">この飲み物を保存</button>
         </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">杯数</label>
-        <div class="option-group">
-          <button class="option-btn" onclick="selectOption(this,'alcCupsVal','1')">1杯</button>
-          <button class="option-btn" onclick="selectOption(this,'alcCupsVal','2')">2杯</button>
-          <button class="option-btn" onclick="selectOption(this,'alcCupsVal','3')">3杯</button>
-          <button class="option-btn" onclick="selectOption(this,'alcCupsVal','4+')">4杯以上</button>
-        </div>
-        <input type="hidden" id="alcCupsVal">
-      </div>
-      <div class="form-group">
-        <label class="form-label">場所</label>
-        <div class="option-group">
-          <button class="option-btn" onclick="selectOption(this,'alcPlaceVal','外飲み')">外飲み</button>
-          <button class="option-btn" onclick="selectOption(this,'alcPlaceVal','家')">家</button>
-          <button class="option-btn" onclick="selectOption(this,'alcPlaceVal','両方')">両方</button>
-        </div>
-        <input type="hidden" id="alcPlaceVal">
-      </div>
-      <div class="form-group">
+
+      <!-- Note (unchanged) -->
+      <div class="form-group" style="margin-top:14px">
         <label class="form-label">メモ</label>
         <input type="text" class="form-input" id="alcNote" placeholder="メモを入力">
       </div>
+
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal('alcohol')">閉じる</button>
@@ -2520,12 +2546,9 @@ function openModal(type) {
     document.getElementById('alcNoneBtn').classList.toggle('selected', a.hasAlcohol === false);
     document.getElementById('alcYesBtn').classList.toggle('selected', a.hasAlcohol === true);
     document.getElementById('alcDetails').style.display = a.hasAlcohol ? 'block' : 'none';
-    document.querySelectorAll('#modal-alcohol .tag-btn').forEach(btn => {
-      btn.classList.toggle('selected', (a.types||[]).includes(btn.textContent));
-    });
-    restoreOption('modal-alcohol', 'alcCupsVal', a.cups);
-    restoreOption('modal-alcohol', 'alcPlaceVal', a.place);
     document.getElementById('alcNote').value = a.note || '';
+    renderAlcoholEventList();
+    hideAlcoholEventForm();
   }
   if (type === 'exercise') {
     document.querySelectorAll('#modal-exercise .tag-btn').forEach(btn => {
@@ -3059,6 +3082,126 @@ function estimateAlcoholGrams(drinkType, count, unit) {
   return { volumeMl, grams: Math.round(grams) };
 }
 
+// ===================== ALCOHOL: STAGE B EVENT UI =====================
+// Multiple drinks per day, each stored in alcoholEvents[]. hasAlcohol stays
+// the single source of truth for "did they drink that day" — these entries
+// only carry the what/how-much detail underneath an already-true day.
+
+function renderAlcoholEventList() {
+  const rec = getRecord(currentDate);
+  const events = rec.alcoholEvents || [];
+  const container = document.getElementById('alcoholEventList');
+  if (!container) return;
+  if (!events.length) {
+    container.innerHTML = '<div style="text-align:center;padding:14px 0 10px;color:var(--text-muted);font-size:13px">まだ記録がありません</div>';
+    return;
+  }
+  const unitLabel = { glass: 'グラス', cup: 'カップ' };
+  container.innerHTML = events.map(ev => {
+    const { grams } = estimateAlcoholGrams(ev.drinkType, ev.count, ev.unit);
+    return `<div class="toilet-event-card">
+      <div class="toilet-event-info">
+        <span class="toilet-event-type">${escHtml(ev.drinkLabel)}</span>
+        <span class="toilet-event-badge">${ev.count}${unitLabel[ev.unit] || 'グラス'}</span>
+        <span style="font-size:11px;color:var(--text-muted)">≈${grams}g</span>
+      </div>
+      <button class="toilet-event-del" onclick="deleteAlcoholEvent('${ev.id}')">削除</button>
+    </div>`;
+  }).join('');
+}
+
+function startNewAlcoholEvent() {
+  document.getElementById('alcoholEventType').value = '';
+  document.getElementById('alcoholEventCount').value = '';
+  document.getElementById('alcoholEventUnit').value = 'glass';
+  document.querySelectorAll('#alcTypeGroup .option-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelectorAll('#alcCountQuick .option-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelectorAll('#alcUnitGroup .option-btn').forEach((b, i) => b.classList.toggle('selected', i === 0));
+  document.getElementById('alcoholEventEstimate').textContent = '';
+  document.getElementById('alcoholEventForm').style.display = 'block';
+  document.getElementById('addAlcoholEventBtn').style.display = 'none';
+}
+
+function selectAlcoholEventType(btn, val) {
+  document.querySelectorAll('#alcTypeGroup .option-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('alcoholEventType').value = val;
+  updateAlcoholEventEstimate();
+}
+
+function setAlcoholEventCount(n) {
+  document.getElementById('alcoholEventCount').value = n;
+  document.querySelectorAll('#alcCountQuick .option-btn').forEach(b => {
+    b.classList.toggle('selected', Number(b.textContent) === n);
+  });
+  updateAlcoholEventEstimate();
+}
+
+function onAlcoholEventCountInput() {
+  document.querySelectorAll('#alcCountQuick .option-btn').forEach(b => b.classList.remove('selected'));
+  updateAlcoholEventEstimate();
+}
+
+function selectAlcoholEventUnit(btn, val) {
+  document.querySelectorAll('#alcUnitGroup .option-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('alcoholEventUnit').value = val;
+  updateAlcoholEventEstimate();
+}
+
+function updateAlcoholEventEstimate() {
+  const type = document.getElementById('alcoholEventType').value;
+  const count = Number(document.getElementById('alcoholEventCount').value) || 0;
+  const unit = document.getElementById('alcoholEventUnit').value || 'glass';
+  const el = document.getElementById('alcoholEventEstimate');
+  if (!type || !count) { el.textContent = ''; return; }
+  const { grams } = estimateAlcoholGrams(type, count, unit);
+  el.textContent = '推定純アルコール: ≈' + grams + 'g';
+}
+
+function cancelAlcoholEventForm() {
+  hideAlcoholEventForm();
+}
+
+function hideAlcoholEventForm() {
+  document.getElementById('alcoholEventForm').style.display = 'none';
+  document.getElementById('addAlcoholEventBtn').style.display = '';
+}
+
+function saveAlcoholEvent() {
+  const drinkType = document.getElementById('alcoholEventType').value;
+  const count = Number(document.getElementById('alcoholEventCount').value);
+  const unit = document.getElementById('alcoholEventUnit').value || 'glass';
+  if (!drinkType) { showToast('種類を選択してください'); return; }
+  if (!count || count < 1) { showToast('杯数を入力してください'); return; }
+
+  const rec = getRecord(currentDate);
+  rec.alcoholEvents.push({
+    id: uid(),
+    drinkType,
+    drinkLabel: (ALCOHOL_DEFAULTS[drinkType] || ALCOHOL_DEFAULTS.other).label,
+    count,
+    unit
+  });
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  hideAlcoholEventForm();
+  renderAlcoholEventList();
+  showToast('飲み物を記録しました');
+}
+
+function deleteAlcoholEvent(id) {
+  if (!confirm('この記録を削除しますか？')) return;
+  const rec = getRecord(currentDate);
+  rec.alcoholEvents = rec.alcoholEvents.filter(e => e.id !== id);
+  rec.updatedAt = new Date().toISOString();
+  saveData();
+  renderDay();
+  renderAlcoholEventList();
+  showToast('削除しました');
+}
+
 function selectAlcohol(val) {
   const rec_has = val === 'yes';
   document.getElementById('alcNoneBtn').classList.toggle('selected', !rec_has);
@@ -3072,11 +3215,9 @@ function saveAlcohol() {
   const hasNone = document.getElementById('alcNoneBtn').classList.contains('selected');
   if (!hasAlc && !hasNone) { rec.alcohol.hasAlcohol = null; }
   else { rec.alcohol.hasAlcohol = hasAlc; }
-  const types = [];
-  document.querySelectorAll('#modal-alcohol .tag-btn.selected').forEach(b => types.push(b.textContent));
-  rec.alcohol.types = types;
-  rec.alcohol.cups = document.getElementById('alcCupsVal').value;
-  rec.alcohol.place = document.getElementById('alcPlaceVal').value;
+  // types/cups/place are legacy fields, no longer edited here — left untouched
+  // so old records keep whatever values they already had (Stage B: alcoholEvents
+  // now carries the per-drink detail instead).
   rec.alcohol.note = document.getElementById('alcNote').value;
   rec.updatedAt = new Date().toISOString();
   saveData();
