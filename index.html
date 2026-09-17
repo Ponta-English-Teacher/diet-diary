@@ -1716,7 +1716,7 @@
         <div class="settings-sub">保存したJSONからデータを復元</div>
       </div>
       <button class="settings-btn" onclick="document.getElementById('importFile').click()">読み込み</button>
-      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importJSON(event)">
     </div>
     <div class="settings-row">
       <div>
@@ -1735,6 +1735,14 @@
         <button class="settings-btn danger" onclick="clearMyFoods()">全削除</button>
       </div>
       <div id="settingsMyFoodsList" style="display:flex;flex-wrap:wrap;gap:6px;min-height:24px"></div>
+    </div>
+    <!-- Recovery snapshots -->
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bg)">
+      <div style="margin-bottom:10px">
+        <div class="settings-label">リカバリー</div>
+        <div class="settings-sub">インポート・復元・全削除の直前データを自動保存（最大5件）</div>
+      </div>
+      <div id="settingsRecoveryList" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
     <div class="modal-actions">
       <button class="btn-save" onclick="closeModal('settings')">閉じる</button>
@@ -1787,6 +1795,8 @@ function removeFromMyFoods(name) {
 }
 
 const STORAGE_KEY = 'dietDiaryData';
+const RECOVERY_KEY = 'dietDiaryRecoveryBackups';
+const RECOVERY_MAX = 5;
 
 let currentDate = todayStr();
 let data = loadData();
@@ -2113,6 +2123,7 @@ function openModal(type) {
   }
   if (type === 'settings') {
     renderSettingsMyFoods();
+    renderRecoveryList();
   }
 
   document.getElementById(`modal-${type}`).classList.add('open');
@@ -3002,8 +3013,208 @@ function copyExportText() {
   });
 }
 
+// ===================== RECOVERY SNAPSHOTS =====================
+// Automatic pre-operation backups for import / restore / clear-all.
+// Stored separately from the main data key so a bad import/restore/clear can
+// always be undone from Settings, even if it already overwrote `dietDiaryData`.
+
+function loadRecoveryBackups() {
+  try { return JSON.parse(localStorage.getItem(RECOVERY_KEY)) || []; } catch { return []; }
+}
+
+function saveRecoveryBackups(arr) {
+  localStorage.setItem(RECOVERY_KEY, JSON.stringify(arr));
+}
+
+function countDays(dataObj) {
+  return Object.keys(dataObj || {}).length;
+}
+
+function dateRangeLabel(dataObj) {
+  const dates = Object.keys(dataObj || {}).sort();
+  if (!dates.length) return '記録なし';
+  return dates.length === 1 ? dates[0] : `${dates[0]}〜${dates[dates.length - 1]}`;
+}
+
+const RECOVERY_REASON_LABEL = { import: 'インポート前', restore: '復元前', 'clear-all': '全削除前' };
+
+// Snapshots the CURRENT persisted state (re-read from localStorage, not just
+// memory) before a destructive operation. Throws on failure so callers can
+// abort the whole operation and leave existing data untouched.
+function createRecoverySnapshot(reason) {
+  const curData       = loadData();
+  const curMyFoods     = loadMyFoods();
+  const curUnitMemory  = loadUnitMemory();
+
+  const snapshot = {
+    id: uid(),
+    createdAt: new Date().toISOString(),
+    reason,
+    stats: { dayCount: countDays(curData), dateRange: dateRangeLabel(curData) },
+    payload: { version: 2, data: curData, myFoods: curMyFoods, unitMemory: curUnitMemory }
+  };
+
+  let list = loadRecoveryBackups();
+  list.push(snapshot);
+  if (list.length > RECOVERY_MAX) list = list.slice(list.length - RECOVERY_MAX);
+
+  try {
+    saveRecoveryBackups(list);
+  } catch (e) {
+    // Likely quota exceeded — drop the oldest snapshot and retry once before giving up.
+    if (list.length > 1) {
+      try {
+        saveRecoveryBackups(list.slice(1));
+        return snapshot;
+      } catch (e2) { /* fall through to throw below */ }
+    }
+    throw new Error('recovery-snapshot-failed');
+  }
+  return snapshot;
+}
+
+function renderRecoveryList() {
+  const container = document.getElementById('settingsRecoveryList');
+  if (!container) return;
+  const list = loadRecoveryBackups().slice().reverse(); // newest first
+  if (!list.length) {
+    container.innerHTML = '<span style="font-size:12px;color:var(--text-muted);font-style:italic">まだ自動バックアップがありません</span>';
+    return;
+  }
+  container.innerHTML = '';
+  list.forEach(snap => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm)';
+    const info = document.createElement('div');
+    info.style.cssText = 'font-size:12px;color:var(--text-sub);line-height:1.5';
+    const d = new Date(snap.createdAt);
+    const dateLabel = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const reasonLabel = RECOVERY_REASON_LABEL[snap.reason] || snap.reason;
+    info.innerHTML = `<div style="font-weight:700;color:var(--text)">${escHtml(dateLabel)}</div><div>${escHtml(reasonLabel)} ・ ${snap.stats.dayCount}日分の記録</div>`;
+    const btn = document.createElement('button');
+    btn.className = 'settings-btn';
+    btn.textContent = '復元';
+    btn.onclick = () => restoreRecoveryBackup(snap.id);
+    row.appendChild(info);
+    row.appendChild(btn);
+    container.appendChild(row);
+  });
+}
+
+// Structural validation only — never trust file MIME type (iOS often reports
+// application/octet-stream for JSON shared via AirDrop/iCloud/Shortcuts).
+function validateBackupPayload(obj) {
+  const errors = [];
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    return { valid: false, errors: ['JSONオブジェクトではありません'] };
+  }
+  const dataObj = (obj.version === 2) ? obj.data : obj;
+  if (!dataObj || typeof dataObj !== 'object' || Array.isArray(dataObj)) {
+    return { valid: false, errors: ['data フィールドが不正です'] };
+  }
+  const dateKeyRe = /^\d{4}-\d{2}-\d{2}$/;
+  for (const k of Object.keys(dataObj)) {
+    if (!dateKeyRe.test(k)) { errors.push(`不正な日付キー: ${k}`); break; }
+    const rec = dataObj[k];
+    if (!rec || typeof rec !== 'object' || Array.isArray(rec)) { errors.push(`不正なレコード: ${k}`); break; }
+    if (!('weight' in rec) && !('mealEvents' in rec) && !('alcohol' in rec)) {
+      errors.push(`Diet Diary のバックアップ形式ではありません: ${k}`);
+      break;
+    }
+  }
+  if (errors.length) return { valid: false, errors };
+  return {
+    valid: true,
+    errors: [],
+    normalized: {
+      version: 2,
+      data: dataObj,
+      myFoods: Array.isArray(obj.myFoods) ? obj.myFoods : [],
+      unitMemory: (obj.unitMemory && typeof obj.unitMemory === 'object') ? obj.unitMemory : {}
+    }
+  };
+}
+
+// Applies an already-validated payload as the new active data, then verifies
+// the write actually landed in localStorage. Throws on any failure so the
+// caller can roll back — never leaves the app in a half-applied state.
+function applyBackupPayload(payload) {
+  data = payload.data || {};
+  saveData();
+  if (payload.myFoods)    saveMyFoods(payload.myFoods);
+  if (payload.unitMemory) saveUnitMemory(payload.unitMemory);
+
+  const verify = loadData();
+  if (JSON.stringify(verify) !== JSON.stringify(data)) {
+    throw new Error('apply-verify-failed');
+  }
+}
+
+function rollbackToSnapshot(snapshot, message) {
+  try {
+    data = snapshot.payload.data || {};
+    saveData();
+    if (snapshot.payload.myFoods)    saveMyFoods(snapshot.payload.myFoods);
+    if (snapshot.payload.unitMemory) saveUnitMemory(snapshot.payload.unitMemory);
+    renderDay();
+    renderSettingsMyFoods();
+    renderRecoveryList();
+    showToast(message || '操作に失敗したため、直前のデータに自動復元しました。データは無事です');
+  } catch (e) {
+    showToast('復元にも失敗しました。ブラウザのストレージ状態をご確認ください');
+  }
+}
+
+// Transactional core shared by import + restore:
+// snapshot current state -> apply new state -> verify -> roll back automatically on failure.
+function runTransactionalReplace(payload, reason, successMsg) {
+  let snapshot;
+  try {
+    snapshot = createRecoverySnapshot(reason);
+  } catch (e) {
+    showToast('自動バックアップを作成できなかったため、操作を中止しました。データは変更されていません');
+    return;
+  }
+
+  try {
+    applyBackupPayload(payload);
+  } catch (e) {
+    rollbackToSnapshot(snapshot, '操作に失敗したため、直前のデータに自動復元しました。データは無事です');
+    return;
+  }
+
+  renderDay();
+  renderSettingsMyFoods();
+  renderRecoveryList();
+  showToast(successMsg);
+}
+
+function restoreRecoveryBackup(id) {
+  const list = loadRecoveryBackups();
+  const snap = list.find(s => s.id === id);
+  if (!snap) { showToast('このバックアップは見つかりませんでした'); return; }
+  const reasonLabel = RECOVERY_REASON_LABEL[snap.reason] || snap.reason;
+  if (!confirm(`${snap.stats.dayCount}日分のバックアップ（${reasonLabel}）に復元しますか？\n現在のデータは自動バックアップされます。`)) return;
+  runTransactionalReplace(snap.payload, 'restore', 'バックアップから復元しました');
+}
+
 // ===================== SETTINGS =====================
-function exportJSON() {
+function backupTimestamp() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${day}_${hh}${mm}`;
+}
+
+function isStandalonePWA() {
+  return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+    || window.navigator.standalone === true; // legacy iOS Safari flag
+}
+
+async function exportJSON() {
   const backup = {
     version: 2,
     exportedAt: new Date().toISOString(),
@@ -3011,10 +3222,28 @@ function exportJSON() {
     myFoods:    loadMyFoods(),
     unitMemory: loadUnitMemory()
   };
+  const filename = `DietDiary_Backup_${backupTimestamp()}.json`;
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+
+  // Home-screen PWA: the anchor `download` attribute doesn't reliably save to
+  // Files in standalone mode, so prefer the native Share Sheet there.
+  if (isStandalonePWA() && window.navigator.canShare && window.navigator.share) {
+    try {
+      const file = new File([blob], filename, { type: 'application/json' });
+      if (window.navigator.canShare({ files: [file] })) {
+        await window.navigator.share({ files: [file], title: filename });
+        showToast('バックアップを書き出しました');
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // user cancelled the share sheet
+      // otherwise fall through to the normal download path
+    }
+  }
+
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `diet_diary_backup_${todayStr()}.json`;
+  a.download = filename;
   a.click();
   showToast('バックアップを書き出しました');
 }
@@ -3024,27 +3253,32 @@ function importJSON(event) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
+    let imported;
     try {
-      const imported = JSON.parse(e.target.result);
-      if (!confirm('データを上書きインポートしますか？')) return;
+      imported = JSON.parse(e.target.result);
+    } catch {
+      showToast('ファイルが正しくありません（JSON解析エラー）');
+      event.target.value = '';
+      return;
+    }
 
-      if (imported.version === 2) {
-        // new format: bundled backup
-        data = imported.data || {};
-        if (imported.myFoods)    saveMyFoods(imported.myFoods);
-        if (imported.unitMemory) saveUnitMemory(imported.unitMemory);
-      } else {
-        // legacy format: data only
-        data = imported;
-      }
+    const check = validateBackupPayload(imported);
+    if (!check.valid) {
+      showToast('バックアップの形式が正しくありません: ' + (check.errors[0] || ''));
+      event.target.value = '';
+      return;
+    }
 
-      saveData();
-      renderDay();
-      showToast('データをインポートしました');
-    } catch { showToast('ファイルが正しくありません'); }
+    const dayCount = countDays(check.normalized.data);
+    if (!confirm(`現在のデータを自動バックアップしてから、${dayCount}日分のデータをインポートします。よろしいですか？`)) {
+      event.target.value = '';
+      return;
+    }
+
+    runTransactionalReplace(check.normalized, 'import', 'データをインポートしました');
+    event.target.value = '';
   };
   reader.readAsText(file);
-  event.target.value = '';
 }
 
 function renderSettingsMyFoods() {
@@ -3080,14 +3314,32 @@ function clearMyFoods() {
 }
 
 function clearAllData() {
-  if (confirm('すべてのデータを削除します。\nマイ食品・単位メモリも含めて完全に削除されます。\n元に戻せません。よろしいですか？')) {
+  if (!confirm('すべてのデータを削除します。\nマイ食品・単位メモリも含めて削除されますが、削除前の状態は自動バックアップされ、設定 → リカバリーから復元できます。\nよろしいですか？')) return;
+
+  let snapshot;
+  try {
+    snapshot = createRecoverySnapshot('clear-all');
+  } catch (e) {
+    showToast('自動バックアップを作成できなかったため、削除を中止しました。データは変更されていません');
+    return;
+  }
+
+  try {
     data = {};
     saveData();
     saveMyFoods([]);
     saveUnitMemory({});
-    renderDay();
-    showToast('すべてのデータを削除しました');
+    const verify = loadData();
+    if (Object.keys(verify).length !== 0) throw new Error('clear-verify-failed');
+  } catch (e) {
+    rollbackToSnapshot(snapshot, '削除に失敗したため、直前のデータに自動復元しました。データは無事です');
+    return;
   }
+
+  renderDay();
+  renderSettingsMyFoods();
+  renderRecoveryList();
+  showToast('すべてのデータを削除しました');
 }
 
 // ===================== TOAST =====================
