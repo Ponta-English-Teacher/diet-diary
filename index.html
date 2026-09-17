@@ -1352,30 +1352,22 @@
         <input type="time" class="form-input" id="mealEventTime">
       </div>
 
-      <!-- Food presets -->
+      <!-- Food search -->
       <div class="form-group">
         <label class="form-label">食べたもの</label>
         <!-- selected chips -->
         <div id="mealEventChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:8px 10px;background:var(--bg);border:2px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px">
           <span id="mealEventChipHint" style="font-size:12px;color:var(--text-muted);font-style:italic">タップして選択 ↓</span>
         </div>
-        <!-- my foods section (always visible) -->
-        <div style="margin-bottom:10px">
-          <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">★ よく使う食品</div>
-          <div id="myFoodsPresets" style="display:flex;flex-wrap:wrap;gap:7px;min-height:24px"></div>
-        </div>
-        <!-- basic presets -->
-        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">基本食品</div>
-        <div id="mealEventPresets" style="display:flex;flex-wrap:wrap;gap:7px;max-height:140px;overflow-y:auto;padding-bottom:4px"></div>
-        <!-- custom input -->
-        <div style="display:flex;gap:8px;margin-top:10px">
-          <input type="text" class="form-input" id="mealEventCustomInput" placeholder="その他を入力…"
-            style="flex:1;padding:9px 13px;font-size:14px"
-            onkeydown="if(event.key==='Enter'){addMealEventCustomFood();event.preventDefault()}">
-          <button class="btn-save" onclick="addMealEventCustomFood()" style="flex:0;padding:9px 16px;font-size:13px">追加</button>
-        </div>
-        <div style="margin-top:6px">
-          <button onclick="saveToMyFoods()" style="width:100%;padding:7px;border-radius:var(--radius-sm);border:1.5px dashed var(--accent);background:transparent;color:var(--accent);font-family:'Noto Sans JP',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.15s">★ マイリストに保存</button>
+        <!-- search box -->
+        <input type="text" class="form-input" id="foodSearchInput" placeholder="食品を検索（例: 豚、卵、ご飯…）"
+          style="padding:13px 16px;font-size:16px;margin-bottom:10px"
+          oninput="onFoodSearchInput(this.value)"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();onFoodSearchEnter(this.value)}">
+        <!-- suggestions: live search results, or My Foods / Recent / Frequent / common foods when empty -->
+        <div id="foodSuggestions"></div>
+        <div style="margin-top:8px">
+          <button onclick="saveToMyFoods()" style="width:100%;padding:9px;border-radius:var(--radius-sm);border:1.5px dashed var(--accent);background:transparent;color:var(--accent);font-family:'Noto Sans JP',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.15s">★ 検索欄の内容をマイリストに保存</button>
         </div>
       </div>
 
@@ -1975,6 +1967,241 @@ function enrichFoodWithDbMatch(food) {
   return enriched;
 }
 
+// ===================== STAGE 2: SEARCH / SUGGESTIONS / STATS =====================
+// Deterministic scoring only — no fuzzy-search package. Exact name match beats
+// name-substring, which beats exact-keyword, which beats keyword-substring.
+// Recent/frequent usage only nudges ranking AMONG items that already matched;
+// it never creates a match by itself.
+function scoreFoodEntry(entry, queryLower) {
+  const nameLower = entry.name.toLowerCase();
+  let score = 0;
+  if (nameLower === queryLower) score = 100;
+  else if (nameLower.includes(queryLower)) score = 60;
+
+  (entry.keywords || []).forEach(kw => {
+    const kwLower = String(kw).toLowerCase();
+    if (kwLower === queryLower) score = Math.max(score, 50);
+    else if (kwLower.includes(queryLower)) score = Math.max(score, 30);
+  });
+  return score;
+}
+
+function getFoodSuggestions(query, limit) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return { items: [] };
+  const stats = loadFoodStats();
+  const usageBonus = name => {
+    const s = stats[name];
+    if (!s) return 0;
+    return Math.min(s.count || 0, 10) * 0.5 + (s.lastUsed ? 2 : 0);
+  };
+
+  const results = [];
+  FOOD_DB.forEach(entry => {
+    const score = scoreFoodEntry(entry, q);
+    if (score > 0) results.push({ name: entry.name, foodId: entry.id, score: score + usageBonus(entry.name) });
+  });
+  loadMyFoods().forEach(name => {
+    if (results.some(r => r.name === name)) return; // already surfaced via a FOOD_DB match
+    const nameLower = name.toLowerCase();
+    let score = 0;
+    if (nameLower === q) score = 100;
+    else if (nameLower.includes(q)) score = 60;
+    if (score > 0) results.push({ name, foodId: null, score: score + usageBonus(name) });
+  });
+
+  results.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, 'ja'));
+  return { items: results.slice(0, limit || 8) };
+}
+
+// ── recent/frequent usage stats (bounded, updated only on successful save) ──
+const FOOD_STATS_KEY = 'dietDiaryFoodStats';
+const FOOD_STATS_MAX = 200;
+
+function loadFoodStats() {
+  try { return JSON.parse(localStorage.getItem(FOOD_STATS_KEY)) || {}; } catch { return {}; }
+}
+function saveFoodStats(stats) {
+  localStorage.setItem(FOOD_STATS_KEY, JSON.stringify(stats));
+}
+
+// Called only from saveMealEvent(), only after a save has actually happened.
+// Never touches mealEvents/day records — this is a separate, purely additive
+// stats key, so no historical data is rewritten to build these numbers.
+function recordFoodUsage(names) {
+  if (!names || !names.length) return;
+  const stats = loadFoodStats();
+  const now = new Date().toISOString();
+  names.forEach(name => {
+    if (!name) return;
+    const cur = stats[name] || { count: 0, lastUsed: null };
+    cur.count = (cur.count || 0) + 1;
+    cur.lastUsed = now;
+    stats[name] = cur;
+  });
+  const keys = Object.keys(stats);
+  if (keys.length > FOOD_STATS_MAX) {
+    keys
+      .sort((a, b) => new Date(stats[a].lastUsed || 0) - new Date(stats[b].lastUsed || 0))
+      .slice(0, keys.length - FOOD_STATS_MAX)
+      .forEach(k => delete stats[k]);
+  }
+  saveFoodStats(stats);
+}
+
+function getRecentFoodNames(limit) {
+  const stats = loadFoodStats();
+  return Object.keys(stats)
+    .sort((a, b) => new Date(stats[b].lastUsed || 0) - new Date(stats[a].lastUsed || 0))
+    .slice(0, limit || 6);
+}
+
+function getFrequentFoodNames(limit) {
+  const stats = loadFoodStats();
+  return Object.keys(stats)
+    .sort((a, b) => (stats[b].count || 0) - (stats[a].count || 0))
+    .slice(0, limit || 6);
+}
+
+// A small, deliberately short list for the empty-search "common foods" row.
+const COMMON_FOOD_IDS = ['rice_white', 'bread', 'egg', 'chicken_breast', 'tofu', 'salad_mixed', 'banana', 'yogurt'];
+
+// ── suggestion UI (replaces the old static preset grid) ─────────────────────
+function onFoodSearchInput(value) {
+  renderFoodSuggestions(value);
+}
+
+function onFoodSearchEnter(value) {
+  const q = String(value || '').trim();
+  if (!q) return;
+  const { items } = getFoodSuggestions(q);
+  addFoodByName(items.length ? items[0].name : q);
+}
+
+// Single entry point for adding a food to the current meal, from any source:
+// a tapped suggestion, Enter in the search box, or the "「q」を追加" fallback.
+function addFoodByName(name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return;
+  if (mealEventFoods.some(f => f.name === trimmed)) {
+    showToast('すでに追加されています');
+  } else {
+    mealEventFoods.push(enrichFoodWithDbMatch({ name: trimmed, portion: '', amount: null, unit: null }));
+    renderMealEventChips();
+  }
+  const input = document.getElementById('foodSearchInput');
+  if (input) input.value = '';
+  renderFoodSuggestions('');
+}
+
+function buildSuggestionRow(name) {
+  const already = mealEventFoods.some(f => f.name === name);
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.textContent = (already ? '✓ ' : '') + name;
+  row.style.cssText = 'width:100%;text-align:left;padding:13px 16px;border-radius:var(--radius-sm);'
+    + 'border:2px solid ' + (already ? 'var(--primary)' : 'var(--border)') + ';'
+    + 'background:' + (already ? 'var(--primary-light)' : 'var(--bg)') + ';'
+    + 'color:' + (already ? 'white' : 'var(--text)') + ';'
+    + "font-family:'Noto Sans JP',sans-serif;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s";
+  row.onclick = () => addFoodByName(name);
+  return row;
+}
+
+function buildAddCustomRow(query) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.textContent = '「' + query + '」を追加';
+  row.style.cssText = 'width:100%;text-align:left;padding:13px 16px;border-radius:var(--radius-sm);'
+    + "border:2px dashed var(--accent);background:transparent;color:var(--accent);"
+    + "font-family:'Noto Sans JP',sans-serif;font-size:15px;font-weight:700;cursor:pointer";
+  row.onclick = () => addFoodByName(query);
+  return row;
+}
+
+function buildFoodTag(name, opts) {
+  opts = opts || {};
+  const already = mealEventFoods.some(f => f.name === name);
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;display:inline-block';
+
+  const btn = document.createElement('button');
+  btn.className = 'meal-preset-tag' + (already ? ' selected' : '');
+  btn.textContent = name;
+  if (opts.deletable) btn.style.paddingRight = '22px';
+  btn.style.minHeight = '38px';
+  btn.onclick = () => addFoodByName(name);
+  wrap.appendChild(btn);
+
+  if (opts.deletable) {
+    const del = document.createElement('button');
+    del.textContent = '×';
+    del.title = 'マイリストから削除';
+    del.style.cssText = 'position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;border:none;background:#c04040;color:white;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1';
+    del.onclick = e => { e.stopPropagation(); removeFromMyFoods(name); };
+    wrap.appendChild(del);
+  }
+  return wrap;
+}
+
+function renderFoodSuggestionsEmpty(container) {
+  container.innerHTML = '';
+
+  const myFoods = loadMyFoods();
+  const recentNames = getRecentFoodNames(6).filter(n => !myFoods.includes(n));
+  const frequentNames = getFrequentFoodNames(6).filter(n => !myFoods.includes(n) && !recentNames.includes(n));
+  const commonNames = COMMON_FOOD_IDS.map(id => findFoodById(id)).filter(Boolean).map(f => f.name);
+
+  const addSection = (title, names, opts) => {
+    if (!names.length) return;
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '12px';
+    const label = document.createElement('div');
+    label.textContent = title;
+    label.style.cssText = 'font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px';
+    wrap.appendChild(label);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:7px';
+    names.forEach(n => row.appendChild(buildFoodTag(n, opts)));
+    wrap.appendChild(row);
+    container.appendChild(wrap);
+  };
+
+  if (!myFoods.length) {
+    const hint = document.createElement('div');
+    hint.textContent = 'マイフードはまだありません（食品を検索して登録できます）';
+    hint.style.cssText = 'font-size:12px;color:var(--text-muted);font-style:italic;margin-bottom:12px';
+    container.appendChild(hint);
+  } else {
+    addSection('★ マイフード', myFoods, { deletable: true });
+  }
+
+  addSection('最近使った食品', recentNames);
+  addSection('よく使う食品', frequentNames);
+  addSection('定番の食品', commonNames);
+}
+
+function renderFoodSuggestions(query) {
+  const container = document.getElementById('foodSuggestions');
+  if (!container) return;
+  const q = String(query || '').trim();
+
+  if (!q) { renderFoodSuggestionsEmpty(container); return; }
+
+  const { items } = getFoodSuggestions(q);
+  container.innerHTML = '';
+
+  if (!items.length) {
+    container.appendChild(buildAddCustomRow(q));
+    return;
+  }
+
+  const list = document.createElement('div');
+  list.style.cssText = 'display:flex;flex-direction:column;gap:6px';
+  items.forEach(item => list.appendChild(buildSuggestionRow(item.name)));
+  container.appendChild(list);
+}
+
 // ── my foods (user's personal list) ─────────────────────────────────────────
 const MY_FOODS_KEY = 'dietDiaryMyFoods';
 const MY_FOODS_MAX = 12;
@@ -1986,7 +2213,7 @@ function saveMyFoods(arr) {
   localStorage.setItem(MY_FOODS_KEY, JSON.stringify(arr));
 }
 function saveToMyFoods() {
-  const input = document.getElementById('mealEventCustomInput');
+  const input = document.getElementById('foodSearchInput');
   const name = input.value.trim();
   if (!name) { showToast('食品名を入力してください'); return; }
   const list = loadMyFoods();
@@ -1994,17 +2221,12 @@ function saveToMyFoods() {
   if (list.length >= MY_FOODS_MAX) { showToast('マイリストは最大' + MY_FOODS_MAX + '個です'); return; }
   list.push(name);
   saveMyFoods(list);
-  if (!mealEventFoods.some(f => f.name === name)) {
-    mealEventFoods.push(enrichFoodWithDbMatch({ name, portion: '', amount: null, unit: null }));
-    renderMealEventChips();
-  }
-  input.value = '';
-  buildMealEventPresets();
+  addFoodByName(name); // also adds it to the current meal + clears the search box
   showToast('「' + name + '」をマイリストに保存しました');
 }
 function removeFromMyFoods(name) {
   saveMyFoods(loadMyFoods().filter(n => n !== name));
-  buildMealEventPresets();
+  renderFoodSuggestions('');
 }
 
 const STORAGE_KEY = 'dietDiaryData';
@@ -2462,11 +2684,11 @@ function startNewMealEvent() {
   document.getElementById('mealEventNote').value = '';
   document.getElementById('mealEventSaveBtn').textContent = 'この食事を保存';
   document.querySelectorAll('#mealTypeGroup .option-btn').forEach(b => b.classList.remove('selected'));
-  buildMealEventPresets();
+  document.getElementById('foodSearchInput').value = '';
+  renderFoodSuggestions('');
   renderMealEventChips();
   document.getElementById('mealEventForm').style.display = 'block';
   document.getElementById('addMealEventBtn').style.display = 'none';
-  document.getElementById('mealEventCustomInput').value = '';
   // set default time to now
   const now = new Date();
   document.getElementById('mealEventTime').value =
@@ -2503,11 +2725,11 @@ function editMealEvent(id) {
   document.querySelectorAll('#mealTypeGroup .option-btn').forEach(b => {
     b.classList.toggle('selected', b.textContent === ev.type);
   });
-  buildMealEventPresets();
+  document.getElementById('foodSearchInput').value = '';
+  renderFoodSuggestions('');
   renderMealEventChips();
   document.getElementById('mealEventForm').style.display = 'block';
   document.getElementById('addMealEventBtn').style.display = 'none';
-  document.getElementById('mealEventCustomInput').value = '';
 }
 
 function deleteMealEvent(id) {
@@ -2534,68 +2756,6 @@ function selectMealEventType(btn, val) {
   document.querySelectorAll('#mealTypeGroup .option-btn').forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
   document.getElementById('mealEventType').value = val;
-}
-
-function buildMealEventPresets() {
-  // ── my foods ──────────────────────────────────────────────────────────
-  const myList = loadMyFoods();
-  const myContainer = document.getElementById('myFoodsPresets');
-  if (myContainer) {
-    myContainer.innerHTML = '';
-    if (!myList.length) {
-      const hint = document.createElement('span');
-      hint.textContent = 'まだ登録がありません';
-      hint.style.cssText = 'font-size:12px;color:var(--text-muted);font-style:italic';
-      myContainer.appendChild(hint);
-    } else {
-      myList.forEach(name => {
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'position:relative;display:inline-block';
-        const btn = document.createElement('button');
-        btn.className = 'meal-preset-tag' + (mealEventFoods.some(f => f.name === name) ? ' selected' : '');
-        btn.style.paddingRight = '20px';
-        btn.textContent = name;
-        btn.onclick = () => toggleMealEventPreset(name, btn);
-        const del = document.createElement('button');
-        del.textContent = '×';
-        del.title = 'マイリストから削除';
-        del.style.cssText = 'position:absolute;top:-4px;right:-4px;width:15px;height:15px;border-radius:50%;border:none;background:#c04040;color:white;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1';
-        del.onclick = e => { e.stopPropagation(); removeFromMyFoods(name); };
-        wrap.appendChild(btn);
-        wrap.appendChild(del);
-        myContainer.appendChild(wrap);
-      });
-    }
-  }
-
-  // ── basic presets ──────────────────────────────────────────────────────
-  const container = document.getElementById('mealEventPresets');
-  container.innerHTML = '';
-  MEAL_PRESETS.forEach(name => {
-    const btn = document.createElement('button');
-    btn.className = 'meal-preset-tag' + (mealEventFoods.some(f => f.name === name) ? ' selected' : '');
-    btn.textContent = name;
-    btn.onclick = () => toggleMealEventPreset(name, btn);
-    container.appendChild(btn);
-  });
-}
-
-function toggleMealEventPreset(name, btn) {
-  const idx = mealEventFoods.findIndex(f => f.name === name);
-  if (idx !== -1) { mealEventFoods.splice(idx, 1); btn.classList.remove('selected'); }
-  else            { mealEventFoods.push(enrichFoodWithDbMatch({ name, portion: '', amount: null, unit: null })); btn.classList.add('selected'); }
-  renderMealEventChips();
-}
-
-function addMealEventCustomFood() {
-  const input = document.getElementById('mealEventCustomInput');
-  const name  = input.value.trim();
-  if (!name) return;
-  if (mealEventFoods.some(f => f.name === name)) { showToast('すでに追加されています'); return; }
-  mealEventFoods.push(enrichFoodWithDbMatch({ name, portion: '', amount: null, unit: null }));
-  input.value = '';
-  buildMealEventPresets();
-  renderMealEventChips();
 }
 
 // ── last-used unit memory ──────────────────────────────────────────────────
@@ -2862,6 +3022,7 @@ function saveMealEvent() {
 
   rec.updatedAt = new Date().toISOString();
   saveData();
+  recordFoodUsage(foods.map(f => f.name).filter(Boolean));
   renderDay();
   hideMealEventForm();
   renderMealEventList();
