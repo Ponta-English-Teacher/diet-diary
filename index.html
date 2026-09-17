@@ -1385,6 +1385,9 @@
         <input type="text" class="form-input" id="mealEventNote" placeholder="例: 外食、お腹いっぱい…">
       </div>
 
+      <!-- Meal total calories -->
+      <div id="mealEventTotalCalories" style="text-align:right;font-size:13px;font-weight:700;color:var(--text-sub);margin:2px 2px 10px"></div>
+
       <!-- Sub-form actions -->
       <div style="display:flex;gap:8px">
         <button class="btn-cancel" onclick="cancelMealEventForm()" style="flex:1">キャンセル</button>
@@ -1762,6 +1765,216 @@ const MEAL_PRESETS = [
   'ナッツ','フルーツ','アイスクリーム','その他'
 ];
 
+// ===================== FOOD DATABASE (Stage 0 foundations) =====================
+// Not wired into the meal UI yet. This is the structured data + pure helpers
+// that later stages (search, calories-in-UI, photo/AI) will build on.
+//
+// Extended (all-optional) food-item shape these helpers understand, for
+// future reference — existing saved foods `{name, portion, amount, unit}`
+// remain valid as-is and are NOT migrated or rewritten:
+//   {
+//     name, amount, unit, portion,        // unchanged existing fields
+//     foodId,                             // optional FOOD_DB id link
+//     calorieBasis: { kcal, per, unit },  // "kcal per `per` `unit`"
+//     calories,                           // derived or manually overridden
+//     calorieSource: 'db'|'ai'|'manual'|'unknown',
+//     isEstimated                         // true => display with "≈"
+//   }
+
+const FOOD_DB = [
+  // ---- staples ----
+  { id: 'rice_white', name: 'ご飯', category: 'staple',
+    keywords: ['白米', 'ごはん', '米', 'rice', 'gohan'],
+    defaultUnit: 'g', calorieBasis: { kcal: 168, per: 100, unit: 'g' }, approximate: false },
+  { id: 'rice_multigrain', name: '雑穀米', category: 'staple',
+    keywords: ['雑穀', '五穀米', 'multigrain rice', 'むぎごはん'],
+    defaultUnit: 'g', calorieBasis: { kcal: 165, per: 100, unit: 'g' }, approximate: false },
+  { id: 'oatmeal', name: 'オートミール', category: 'staple',
+    keywords: ['oatmeal', 'oats', 'オーツ'],
+    defaultUnit: 'g', calorieBasis: { kcal: 380, per: 100, unit: 'g' }, approximate: true },
+  { id: 'bread', name: '食パン', category: 'staple',
+    keywords: ['パン', 'bread', 'toast', '食パン'],
+    defaultUnit: '枚', calorieBasis: { kcal: 158, per: 1, unit: '枚' }, approximate: true },
+
+  // ---- protein ----
+  { id: 'egg', name: '卵', category: 'protein',
+    keywords: ['egg', 'たまご', '生卵'],
+    defaultUnit: '個', calorieBasis: { kcal: 76, per: 1, unit: '個' }, approximate: false },
+  { id: 'boiled_egg', name: 'ゆで卵', category: 'protein',
+    keywords: ['boiled egg', 'ゆでたまご', '半熟卵'],
+    defaultUnit: '個', calorieBasis: { kcal: 76, per: 1, unit: '個' }, approximate: false },
+  { id: 'tofu', name: '豆腐', category: 'protein',
+    keywords: ['tofu', '絹豆腐', '木綿豆腐'],
+    defaultUnit: 'g', calorieBasis: { kcal: 56, per: 100, unit: 'g' }, approximate: false },
+  { id: 'chicken_breast', name: '鶏むね肉', category: 'protein',
+    keywords: ['chicken breast', 'chicken', 'むね肉', 'とりむね', '鶏肉'],
+    defaultUnit: 'g', calorieBasis: { kcal: 108, per: 100, unit: 'g' }, approximate: false },
+  { id: 'salad_chicken', name: 'サラダチキン', category: 'protein',
+    keywords: ['salad chicken', 'チキンバー'],
+    defaultUnit: 'g', calorieBasis: { kcal: 105, per: 100, unit: 'g' }, approximate: true },
+  { id: 'pork', name: '豚肉', category: 'protein',
+    keywords: ['pork', '豚', 'ぶたにく'],
+    defaultUnit: 'g', calorieBasis: { kcal: 210, per: 100, unit: 'g' }, approximate: true },
+
+  // ---- dishes ----
+  { id: 'pork_ginger', name: '豚の生姜焼き', category: 'dish',
+    keywords: ['pork ginger', 'ginger pork', '生姜焼き', 'しょうが焼き'],
+    defaultUnit: '皿', calorieBasis: { kcal: 380, per: 1, unit: '皿' }, approximate: true },
+  { id: 'pork_shabu', name: '豚しゃぶ', category: 'dish',
+    keywords: ['pork shabu-shabu', 'shabu shabu', 'しゃぶしゃぶ'],
+    defaultUnit: '皿', calorieBasis: { kcal: 320, per: 1, unit: '皿' }, approximate: true },
+  { id: 'tonkatsu', name: 'とんかつ', category: 'dish',
+    keywords: ['tonkatsu', 'pork cutlet', 'カツ'],
+    defaultUnit: '枚', calorieBasis: { kcal: 450, per: 1, unit: '枚' }, approximate: true },
+  { id: 'curry_rice', name: 'カレーライス', category: 'dish',
+    keywords: ['curry rice', 'curry', 'カレー'],
+    defaultUnit: '皿', calorieBasis: { kcal: 760, per: 1, unit: '皿' }, approximate: true },
+  { id: 'gyudon', name: '牛丼', category: 'dish',
+    keywords: ['gyudon', 'beef bowl', '牛肉丼'],
+    defaultUnit: '杯', calorieBasis: { kcal: 733, per: 1, unit: '杯' }, approximate: true },
+  { id: 'ramen', name: 'ラーメン', category: 'dish',
+    keywords: ['ramen', 'らーめん', '中華そば'],
+    defaultUnit: '杯', calorieBasis: { kcal: 500, per: 1, unit: '杯' }, approximate: true },
+  { id: 'soba', name: 'そば', category: 'dish',
+    keywords: ['soba', '蕎麦', 'buckwheat noodles'],
+    defaultUnit: '杯', calorieBasis: { kcal: 330, per: 1, unit: '杯' }, approximate: true },
+  { id: 'udon', name: 'うどん', category: 'dish',
+    keywords: ['udon'],
+    defaultUnit: '杯', calorieBasis: { kcal: 350, per: 1, unit: '杯' }, approximate: true },
+  { id: 'sushi', name: '寿司', category: 'dish',
+    keywords: ['sushi', 'すし', 'nigiri'],
+    defaultUnit: '人前', calorieBasis: { kcal: 500, per: 1, unit: '人前' }, approximate: true },
+  { id: 'hamburger_steak', name: 'ハンバーグ', category: 'dish',
+    keywords: ['hamburger steak', 'salisbury steak'],
+    defaultUnit: '個', calorieBasis: { kcal: 380, per: 1, unit: '個' }, approximate: true },
+
+  // ---- vegetables ----
+  { id: 'salad_mixed', name: 'サラダ', category: 'vegetable',
+    keywords: ['salad', '野菜サラダ', 'mixed salad'],
+    defaultUnit: 'g', calorieBasis: { kcal: 20, per: 100, unit: 'g' }, approximate: true },
+  { id: 'stir_fry_vegetable', name: '野菜炒め', category: 'vegetable',
+    keywords: ['vegetable stir-fry', 'yasai itame'],
+    defaultUnit: '皿', calorieBasis: { kcal: 150, per: 1, unit: '皿' }, approximate: true },
+  { id: 'cabbage', name: 'キャベツ', category: 'vegetable',
+    keywords: ['cabbage'],
+    defaultUnit: 'g', calorieBasis: { kcal: 23, per: 100, unit: 'g' }, approximate: false },
+  { id: 'tomato', name: 'トマト', category: 'vegetable',
+    keywords: ['tomato'],
+    defaultUnit: 'g', calorieBasis: { kcal: 19, per: 100, unit: 'g' }, approximate: false },
+  { id: 'cucumber', name: 'きゅうり', category: 'vegetable',
+    keywords: ['cucumber'],
+    defaultUnit: 'g', calorieBasis: { kcal: 14, per: 100, unit: 'g' }, approximate: false },
+  { id: 'broccoli', name: 'ブロッコリー', category: 'vegetable',
+    keywords: ['broccoli'],
+    defaultUnit: 'g', calorieBasis: { kcal: 33, per: 100, unit: 'g' }, approximate: false },
+
+  // ---- fruit ----
+  { id: 'banana', name: 'バナナ', category: 'fruit',
+    keywords: ['banana'],
+    defaultUnit: '本', calorieBasis: { kcal: 93, per: 1, unit: '本' }, approximate: false },
+  { id: 'apple', name: 'りんご', category: 'fruit',
+    keywords: ['apple', 'ringo'],
+    defaultUnit: '個', calorieBasis: { kcal: 138, per: 1, unit: '個' }, approximate: false },
+  { id: 'mandarin', name: 'みかん', category: 'fruit',
+    keywords: ['mandarin orange', 'tangerine', 'mikan'],
+    defaultUnit: '個', calorieBasis: { kcal: 45, per: 1, unit: '個' }, approximate: false },
+  { id: 'strawberry', name: 'いちご', category: 'fruit',
+    keywords: ['strawberry', 'ichigo'],
+    defaultUnit: '粒', calorieBasis: { kcal: 6, per: 1, unit: '粒' }, approximate: false },
+
+  // ---- dairy ----
+  { id: 'yogurt', name: 'ヨーグルト', category: 'dairy',
+    keywords: ['yogurt', 'yoghurt'],
+    defaultUnit: 'g', calorieBasis: { kcal: 62, per: 100, unit: 'g' }, approximate: false },
+  { id: 'milk', name: '牛乳', category: 'dairy',
+    keywords: ['milk', 'gyunyu'],
+    defaultUnit: 'ml', calorieBasis: { kcal: 67, per: 100, unit: 'ml' }, approximate: false },
+];
+
+// Exact-match lookups only (Stage 0). Ranked/fuzzy search across keywords is
+// deliberately deferred to a later stage — these are just the simple building
+// blocks a future search function (or Stage 1's exact-name calorie lookup)
+// can call.
+function findFoodById(id) {
+  if (!id) return null;
+  return FOOD_DB.find(f => f.id === id) || null;
+}
+
+function findFoodByName(name) {
+  if (!name) return null;
+  const n = String(name).trim();
+  if (!n) return null;
+  return FOOD_DB.find(f => f.name === n) || null;
+}
+
+// Pure calorie calculation for a single food-item object. Understands the
+// optional calorie fields documented above; returns null (unknown) whenever
+// there isn't enough information to compute a number — never guesses.
+function calcCalories(food) {
+  if (!food) return null;
+  if (food.calorieSource === 'manual') {
+    return (typeof food.calories === 'number' && isFinite(food.calories)) ? food.calories : null;
+  }
+  const basis = food.calorieBasis;
+  if (!basis || food.amount == null || food.amount === '') return null;
+  const amount = Number(food.amount);
+  const kcal = Number(basis.kcal);
+  const per = Number(basis.per);
+  if (!isFinite(amount) || !isFinite(kcal) || !isFinite(per) || per <= 0) return null;
+  return Math.round(kcal * (amount / per));
+}
+
+// Sums calories across a meal's foods[]. Foods with unknown calories don't
+// contribute to the numeric total but do mark the total as an estimate, so
+// the UI never presents a partial sum as if it were exact.
+function calcMealTotal(foods) {
+  const list = Array.isArray(foods) ? foods : [];
+  if (!list.length) return { totalCalories: null, hasEstimate: false };
+  let sum = 0;
+  let anyKnown = false;
+  let hasEstimate = false;
+  list.forEach(f => {
+    const cal = calcCalories(f);
+    if (cal != null) {
+      sum += cal;
+      anyKnown = true;
+      if (f.isEstimated) hasEstimate = true;
+    } else {
+      hasEstimate = true;
+    }
+  });
+  return { totalCalories: anyKnown ? sum : null, hasEstimate };
+}
+
+// ===================== STAGE 1: SAFE FOOD MATCHING =====================
+// Deterministic-only matching (exact trimmed name match against FOOD_DB).
+// No fuzzy/scored search here by design — that's a later stage. If nothing
+// matches safely, calorie info is left unknown rather than guessed.
+function matchFoodSafely(name) {
+  if (!name) return null;
+  const trimmed = String(name).trim();
+  if (!trimmed) return null;
+  return findFoodByName(trimmed);
+}
+
+// Returns a new food object enriched with DB-derived calorie fields when a
+// safe match exists. Never mutates the object passed in, and never touches
+// an existing manual calorie override — manual always takes precedence.
+function enrichFoodWithDbMatch(food) {
+  if (!food || food.calorieSource === 'manual') return { ...food };
+  const match = matchFoodSafely(food.name);
+  if (!match) return { ...food };
+  const enriched = {
+    ...food,
+    foodId: match.id,
+    calorieBasis: match.calorieBasis,
+    calorieSource: 'db',
+    isEstimated: !!match.approximate
+  };
+  enriched.calories = calcCalories(enriched);
+  return enriched;
+}
+
 // ── my foods (user's personal list) ─────────────────────────────────────────
 const MY_FOODS_KEY = 'dietDiaryMyFoods';
 const MY_FOODS_MAX = 12;
@@ -1782,7 +1995,7 @@ function saveToMyFoods() {
   list.push(name);
   saveMyFoods(list);
   if (!mealEventFoods.some(f => f.name === name)) {
-    mealEventFoods.push({ name, portion: '', amount: null, unit: null });
+    mealEventFoods.push(enrichFoodWithDbMatch({ name, portion: '', amount: null, unit: null }));
     renderMealEventChips();
   }
   input.value = '';
@@ -1977,12 +2190,16 @@ function renderInlineMealFeed(rec) {
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="inline-meal-note">${escHtml(ev.note)}</div>` : '';
+    const { totalCalories, hasEstimate } = calcMealTotal(ev.foods || []);
+    const calHtml = totalCalories != null
+      ? `<div style="font-size:11px;font-weight:700;color:var(--text-sub);margin-top:4px">🔥 ${hasEstimate ? '≈' : ''}${totalCalories} kcal</div>`
+      : '';
     return `<div class="inline-meal-card">
       <div class="inline-meal-top">
         <div><span class="inline-meal-type">${escHtml(ev.type||'食事')}</span>${timeStr}</div>
         <button class="inline-meal-edit-btn" onclick="openMealModalAndEdit('${ev.id}')">編集</button>
       </div>
-      ${foodsHtml}${noteHtml}
+      ${foodsHtml}${noteHtml}${calHtml}
     </div>`;
   }).join('');
 }
@@ -2216,6 +2433,10 @@ function renderMealEventList() {
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="meal-event-note">${escHtml(ev.note)}</div>` : '';
+    const { totalCalories, hasEstimate } = calcMealTotal(ev.foods || []);
+    const calHtml = totalCalories != null
+      ? `<div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-top:6px">🔥 ${hasEstimate ? '≈' : ''}${totalCalories} kcal</div>`
+      : '';
     return `<div class="meal-event-card">
       <div class="meal-event-card-header">
         <div><span class="meal-event-type-label">${escHtml(ev.type||'食事')}</span>${timeStr}</div>
@@ -2224,7 +2445,7 @@ function renderMealEventList() {
           <button class="meal-event-del-btn"  onclick="deleteMealEvent('${ev.id}')">削除</button>
         </div>
       </div>
-      ${foodsHtml}${noteHtml}
+      ${foodsHtml}${noteHtml}${calHtml}
     </div>`;
   }).join('');
 }
@@ -2257,7 +2478,23 @@ function editMealEvent(id) {
   const ev  = rec.mealEvents.find(e => e.id === id);
   if (!ev) return;
   editingMealEventId = id;
-  mealEventFoods = (ev.foods || []).map(f => ({ name: f.name, portion: f.portion || '', amount: f.amount != null ? f.amount : null, unit: f.unit || null }));
+  mealEventFoods = (ev.foods || []).map(f => {
+    const base = {
+      name: f.name,
+      portion: f.portion || '',
+      amount: f.amount != null ? f.amount : null,
+      unit: f.unit || null,
+      foodId: f.foodId || null,
+      calorieBasis: f.calorieBasis || null,
+      calories: f.calories != null ? f.calories : null,
+      calorieSource: f.calorieSource || null,
+      isEstimated: !!f.isEstimated
+    };
+    // Legacy food with no calorie info yet: try a safe match now, in this
+    // transient edit buffer only. Nothing is written back to storage unless
+    // the user then taps Save/Update.
+    return base.calorieSource ? base : enrichFoodWithDbMatch(base);
+  });
   document.getElementById('mealEventType').value = ev.type || '';
   document.getElementById('mealEventTime').value = ev.time || '';
   document.getElementById('mealEventNote').value = ev.note || '';
@@ -2346,7 +2583,7 @@ function buildMealEventPresets() {
 function toggleMealEventPreset(name, btn) {
   const idx = mealEventFoods.findIndex(f => f.name === name);
   if (idx !== -1) { mealEventFoods.splice(idx, 1); btn.classList.remove('selected'); }
-  else            { mealEventFoods.push({ name, portion: '', amount: null, unit: null }); btn.classList.add('selected'); }
+  else            { mealEventFoods.push(enrichFoodWithDbMatch({ name, portion: '', amount: null, unit: null })); btn.classList.add('selected'); }
   renderMealEventChips();
 }
 
@@ -2355,7 +2592,7 @@ function addMealEventCustomFood() {
   const name  = input.value.trim();
   if (!name) return;
   if (mealEventFoods.some(f => f.name === name)) { showToast('すでに追加されています'); return; }
-  mealEventFoods.push({ name, portion: '', amount: null, unit: null });
+  mealEventFoods.push(enrichFoodWithDbMatch({ name, portion: '', amount: null, unit: null }));
   input.value = '';
   buildMealEventPresets();
   renderMealEventChips();
@@ -2378,7 +2615,7 @@ function renderMealEventChips() {
   wrap.innerHTML = '';
   wrap.appendChild(hint);
 
-  if (!mealEventFoods.length) { hint.style.display = 'inline'; return; }
+  if (!mealEventFoods.length) { hint.style.display = 'inline'; renderMealEventTotal(); return; }
   hint.style.display = 'none';
 
   const portionBg    = { s:'#d4f5e9', m:'#fef3d0', l:'#fde0e0' };
@@ -2450,6 +2687,21 @@ function renderMealEventChips() {
     };
     chip.appendChild(rb);
     wrapper.appendChild(chip);
+
+    // ── calorie subline (always visible, unobtrusive when unknown) ─────────
+    const calLine = document.createElement('div');
+    calLine.style.cssText = 'font-size:11px;padding:2px 4px 0 6px';
+    const calValue = calcCalories(f);
+    if (calValue != null) {
+      calLine.style.color = f.isEstimated ? '#b8820a' : 'var(--text-sub)';
+      calLine.style.fontWeight = '700';
+      calLine.textContent = (f.isEstimated ? '≈' : '') + calValue + ' kcal';
+    } else {
+      calLine.style.color = 'var(--text-muted)';
+      calLine.style.fontStyle = 'italic';
+      calLine.textContent = '— kcal';
+    }
+    wrapper.appendChild(calLine);
 
     // ── quantity section (hidden by default) ────────────────────────────────
     const sec = document.createElement('div');
@@ -2531,10 +2783,63 @@ function renderMealEventChips() {
 
     buildQuickButtons();
     sec.appendChild(quickRow);
+
+    // ── manual calorie override ─────────────────────────────────────────────
+    const calRow = document.createElement('div');
+    calRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)';
+
+    const calLabel = document.createElement('span');
+    calLabel.textContent = 'カロリー:';
+    calLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text-sub);flex-shrink:0';
+    calRow.appendChild(calLabel);
+
+    const calInput = document.createElement('input');
+    calInput.type = 'number';
+    calInput.placeholder = 'kcal';
+    calInput.value = (f.calorieSource === 'manual' && f.calories != null) ? f.calories : '';
+    calInput.style.cssText = 'width:70px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif';
+    calInput.oninput = () => {
+      const v = calInput.value.trim();
+      if (v === '') return; // clearing is done via the button below, not by emptying this field
+      const n = Number(v);
+      if (!isFinite(n)) return;
+      mealEventFoods[i].calorieSource = 'manual';
+      mealEventFoods[i].calories = n;
+      mealEventFoods[i].isEstimated = false;
+      renderMealEventChips();
+    };
+    calRow.appendChild(calInput);
+
+    const calUnitLabel = document.createElement('span');
+    calUnitLabel.textContent = 'kcal（手動入力）';
+    calUnitLabel.style.cssText = 'font-size:11px;color:var(--text-muted)';
+    calRow.appendChild(calUnitLabel);
+
+    if (f.calorieSource === 'manual') {
+      const clearCalBtn = document.createElement('button');
+      clearCalBtn.textContent = '手動値をクリア';
+      clearCalBtn.style.cssText = 'margin-left:auto;padding:4px 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--card);font-size:11px;font-weight:700;cursor:pointer;color:var(--text-sub);font-family:Noto Sans JP,sans-serif;white-space:nowrap';
+      clearCalBtn.onclick = () => {
+        mealEventFoods[i] = enrichFoodWithDbMatch({ ...mealEventFoods[i], calorieSource: null, calories: null, isEstimated: false });
+        renderMealEventChips();
+      };
+      calRow.appendChild(clearCalBtn);
+    }
+
+    sec.appendChild(calRow);
     wrapper.appendChild(sec);
 
     wrap.appendChild(wrapper);
   });
+
+  renderMealEventTotal();
+}
+
+function renderMealEventTotal() {
+  const el = document.getElementById('mealEventTotalCalories');
+  if (!el) return;
+  const { totalCalories, hasEstimate } = calcMealTotal(mealEventFoods);
+  el.textContent = (totalCalories == null) ? '' : ('合計: ' + (hasEstimate ? '≈' : '') + totalCalories + ' kcal');
 }
 
 function saveMealEvent() {
@@ -2542,15 +2847,16 @@ function saveMealEvent() {
   const time  = document.getElementById('mealEventTime').value;
   const note  = document.getElementById('mealEventNote').value.trim();
   const foods = mealEventFoods.filter(f => f.name && f.name.trim());
+  const { totalCalories, hasEstimate } = calcMealTotal(foods);
 
   const rec = getRecord(currentDate);
 
   if (editingMealEventId) {
     const idx = rec.mealEvents.findIndex(e => e.id === editingMealEventId);
-    if (idx !== -1) rec.mealEvents[idx] = { ...rec.mealEvents[idx], type, time, foods, note };
+    if (idx !== -1) rec.mealEvents[idx] = { ...rec.mealEvents[idx], type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate };
     showToast('食事を更新しました');
   } else {
-    rec.mealEvents.push({ id: uid(), type, time, foods, note });
+    rec.mealEvents.push({ id: uid(), type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate });
     showToast('食事を保存しました');
   }
 
