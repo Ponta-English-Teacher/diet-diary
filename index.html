@@ -2288,6 +2288,7 @@ function getRecord(dateStr) {
         dinner: { items: [], amount: '', note: '' }
       },
       alcohol: { hasAlcohol: null, types: [], cups: '', place: '', note: '' },
+      alcoholEvents: [],
       sleep: { bedTime: '', wakeTime: '', hours: '' },
       toilet: { bowelCount: '', bowelCondition: '', urination: '' },  // legacy
       toiletEvents: [],
@@ -2299,6 +2300,7 @@ function getRecord(dateStr) {
   }
   if (!data[dateStr].mealEvents) data[dateStr].mealEvents = [];
   if (!data[dateStr].toiletEvents) data[dateStr].toiletEvents = [];
+  if (!data[dateStr].alcoholEvents) data[dateStr].alcoholEvents = [];
   return data[dateStr];
 }
 
@@ -3026,6 +3028,35 @@ function saveMealEvent() {
   renderDay();
   hideMealEventForm();
   renderMealEventList();
+}
+
+// ===================== ALCOHOL: STAGE A FOUNDATIONS =====================
+// Not wired into the alcohol UI yet. Pure data + calculation helpers only —
+// existing alcohol logging (hasAlcohol/types/cups/place/note) is untouched.
+//
+// Estimation formula: beverage volume (ml) × ABV × ethanol density (g/ml).
+// glass/cup are simple, editable serving-size assumptions per drink type —
+// the user never enters ml; these are internal defaults only.
+const ETHANOL_DENSITY_G_PER_ML = 0.8;
+
+const ALCOHOL_DEFAULTS = {
+  shochu:  { label: '焼酎',       glassMl: 100, cupMl: 180, abv: 25 },
+  beer:    { label: 'ビール',     glassMl: 350, cupMl: 200, abv: 5  },
+  whiskey: { label: 'ウイスキー', glassMl: 30,  cupMl: 60,  abv: 40 },
+  gin:     { label: 'ジン',       glassMl: 30,  cupMl: 60,  abv: 40 },
+  wine:    { label: 'ワイン',     glassMl: 120, cupMl: 150, abv: 12 },
+  other:   { label: 'その他',     glassMl: 350, cupMl: 200, abv: 7  }
+};
+
+// Returns an approximate beverage volume and pure-alcohol gram estimate.
+// Always approximate by design — callers should present this with "≈".
+function estimateAlcoholGrams(drinkType, count, unit) {
+  const defaults = ALCOHOL_DEFAULTS[drinkType] || ALCOHOL_DEFAULTS.other;
+  const n = Number(count) || 0;
+  const perServingMl = unit === 'cup' ? defaults.cupMl : defaults.glassMl;
+  const volumeMl = perServingMl * n;
+  const grams = volumeMl * (defaults.abv / 100) * ETHANOL_DENSITY_G_PER_ML;
+  return { volumeMl, grams: Math.round(grams) };
 }
 
 function selectAlcohol(val) {
