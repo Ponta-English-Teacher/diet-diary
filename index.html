@@ -2005,6 +2005,34 @@ function refreshStoredCalories(food) {
   food.calories = calcCalories(food);
 }
 
+// Corrects a food's name in the current meal edit buffer (used by both manual
+// and AI-detected foods — there is no separate AI correction screen). Clears
+// any stale DB linkage first, then re-runs the same safe FOOD_DB matching as
+// everywhere else via enrichFoodWithDbMatch(). A manual calorie override is
+// preserved as-is (enrichFoodWithDbMatch already leaves calorieSource:
+// 'manual' foods untouched); origin/confidence survive automatically through
+// the object spread inside that helper.
+function renameFoodInEditor(index, newName) {
+  const trimmed = String(newName || '').trim();
+  const food = mealEventFoods[index];
+  if (!food) return;
+  if (!trimmed || trimmed === food.name) { renderMealEventChips(); return; }
+
+  const isManualOverride = food.calorieSource === 'manual';
+  const updated = {
+    ...food,
+    name: trimmed,
+    foodId: null,
+    calorieBasis: null,
+    calorieSource: isManualOverride ? 'manual' : null,
+    isEstimated: false,
+    calories: isManualOverride ? food.calories : null
+  };
+
+  mealEventFoods[index] = enrichFoodWithDbMatch(updated);
+  renderMealEventChips();
+}
+
 // ===================== STAGE 1: SAFE FOOD MATCHING =====================
 // Deterministic-only matching (exact trimmed name match against FOOD_DB).
 // No fuzzy/scored search here by design — that's a later stage. If nothing
@@ -3046,12 +3074,18 @@ function renderMealEventChips() {
     chip.className = 'meal-food-chip';
     chip.style.cssText = 'display:flex;align-items:center;gap:5px;padding:6px 8px 6px 12px;width:100%;border-radius:10px;flex-wrap:nowrap';
 
-    // food name (+ small AI badge for photo-detected items)
+    // food name (editable — corrects both manual and AI-detected foods
+    // through the same field) + small AI badge for photo-detected items
     const lbl = document.createElement('span');
     lbl.style.cssText = 'font-weight:700;font-size:13px;flex:1;display:flex;align-items:center;gap:4px;min-width:0';
-    const lblText = document.createElement('span');
-    lblText.textContent = f.name;
-    lblText.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    const lblText = document.createElement('input');
+    lblText.type = 'text';
+    lblText.value = f.name;
+    lblText.title = '食品名を編集';
+    lblText.style.cssText = 'flex:1;min-width:0;border:none;border-bottom:1px dashed transparent;background:transparent;font-weight:700;font-size:13px;color:var(--text);padding:0 1px;outline:none;font-family:\'Noto Sans JP\',sans-serif';
+    lblText.onfocus = () => { lblText.style.borderBottomColor = 'var(--accent)'; };
+    lblText.onblur = () => { lblText.style.borderBottomColor = 'transparent'; };
+    lblText.onchange = () => { renameFoodInEditor(i, lblText.value); };
     lbl.appendChild(lblText);
     if (f.origin === 'ai') {
       const aiBadge = document.createElement('span');
@@ -3817,18 +3851,52 @@ function buildDayText(dateStr) {
   lines.push(`■日付\n${dateStr}\n`);
   lines.push(`■体重\n朝: ${r.weight.morning||'未入力'}kg\n夜: ${r.weight.evening||'未入力'}kg\n`);
   if (r.mealEvents && r.mealEvents.length) {
-    const mealLines = r.mealEvents.map(ev => {
-      const foods = (ev.foods||[]).filter(f=>f.name).map(f => {
-        if (f.amount != null && f.amount !== '') return f.name + ' ' + f.amount + (f.unit||'');
-        if (f.portion) return f.name + '(' + f.portion.toUpperCase() + ')';
-        return f.name;
-      }).join('、') || '未記入';
+    const mealBlocks = r.mealEvents.map(ev => {
+      const foods = (ev.foods || []).filter(f => f.name);
+      const foodLines = foods.map(f => {
+        let qty = '';
+        if (f.amount != null && f.amount !== '') qty = ' ' + f.amount + (f.unit || '');
+        else if (f.portion) qty = '(' + f.portion.toUpperCase() + ')';
+        const cal = calcCalories(f);
+        const calStr = cal != null ? ` — ${f.isEstimated ? '≈' : ''}${cal} kcal` : '';
+        return `・${f.name}${qty}${calStr}`;
+      });
       const t = ev.time ? ` (${ev.time})` : '';
-      return `${ev.type||'食事'}${t}: ${foods}${ev.note?' / '+ev.note:''}`;
+      const noteLine = ev.note ? `\n${ev.note}` : '';
+      const { totalCalories, hasEstimate } = calcMealTotal(foods);
+      const totalLine = totalCalories != null ? `\n食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal` : '';
+      const body = foodLines.length ? foodLines.join('\n') : '未記入';
+      return `${ev.type || '食事'}${t}\n${body}${noteLine}${totalLine}`;
     });
-    lines.push(`■食事\n${mealLines.join('\n')}\n`);
+    lines.push(`■食事\n\n${mealBlocks.join('\n\n')}\n`);
+
+    // Daily calorie total — recomputed fresh from foods each time, never
+    // trusting a possibly-stale stored totalCalories. Omitted entirely (not
+    // shown as 0) when no meal that day has any known calorie information.
+    let dayTotal = 0;
+    let dayHasKnown = false;
+    let dayHasEstimate = false;
+    r.mealEvents.forEach(ev => {
+      const { totalCalories, hasEstimate } = calcMealTotal((ev.foods || []).filter(f => f.name));
+      if (totalCalories != null) { dayTotal += totalCalories; dayHasKnown = true; }
+      if (hasEstimate) dayHasEstimate = true;
+    });
+    if (dayHasKnown) {
+      const totalStr = Math.round(dayTotal).toLocaleString('ja-JP');
+      lines.push(`■1日の摂取カロリー\n推定合計: ${dayHasEstimate ? '≈' : ''}${totalStr} kcal\n`);
+    }
   }
-  if (r.alcohol.hasAlcohol === true) {
+  const alcEvents = r.alcoholEvents || [];
+  if (alcEvents.length) {
+    const alcUnitLabel = { glass: 'グラス', cup: 'カップ' };
+    let alcTotal = 0;
+    const alcLines = alcEvents.map(ev => {
+      const { grams } = estimateAlcoholGrams(ev.drinkType, ev.count, ev.unit);
+      alcTotal += grams;
+      return `${ev.drinkLabel} — ${ev.count}${alcUnitLabel[ev.unit] || 'グラス'} — 推定純アルコール ≈${grams}g`;
+    });
+    lines.push(`■飲酒\n${alcLines.join('\n')}\n本日の推定純アルコール合計: ≈${Math.round(alcTotal)}g\n`);
+  } else if (r.alcohol.hasAlcohol === true) {
     lines.push(`■飲酒\n${r.alcohol.types.join('・')} ${r.alcohol.cups}杯（${r.alcohol.place}）${r.alcohol.note?'\n'+r.alcohol.note:''}\n`);
   } else if (r.alcohol.hasAlcohol === false) {
     lines.push(`■飲酒\nなし\n`);
