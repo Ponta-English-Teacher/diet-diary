@@ -134,6 +134,7 @@ module.exports = async function handler(req, res) {
       })
     });
   } catch (e) {
+    console.error('OpenAI fetch failed:', e);
     return fail(res, 502, 'Could not reach OpenAI.');
   }
 
