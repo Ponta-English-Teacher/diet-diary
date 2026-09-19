@@ -1355,11 +1355,18 @@
       <!-- Photo capture (optional) -->
       <div class="form-group">
         <label class="form-label">写真から入力（任意）</label>
-        <button type="button" onclick="startMealPhotoCapture()"
-          style="width:100%;padding:12px;border-radius:var(--radius-sm);border:2px dashed var(--accent);background:transparent;color:var(--accent);font-family:'Noto Sans JP',sans-serif;font-size:14px;font-weight:700;cursor:pointer">
-          📷 写真から入力
-        </button>
-        <input type="file" id="mealPhotoInput" accept="image/*" capture="environment" style="display:none" onchange="handleMealPhotoSelected(event)">
+        <div style="display:flex;gap:8px">
+          <button type="button" onclick="triggerMealPhotoInput('mealPhotoCameraInput')"
+            style="flex:1;padding:12px;border-radius:var(--radius-sm);border:2px dashed var(--accent);background:transparent;color:var(--accent);font-family:'Noto Sans JP',sans-serif;font-size:14px;font-weight:700;cursor:pointer">
+            📷 写真を撮る
+          </button>
+          <button type="button" onclick="triggerMealPhotoInput('mealPhotoLibraryInput')"
+            style="flex:1;padding:12px;border-radius:var(--radius-sm);border:2px dashed var(--accent);background:transparent;color:var(--accent);font-family:'Noto Sans JP',sans-serif;font-size:14px;font-weight:700;cursor:pointer">
+            🖼 写真を選ぶ
+          </button>
+        </div>
+        <input type="file" id="mealPhotoCameraInput" accept="image/*" capture="environment" style="display:none" onchange="handleMealPhotoSelected(event)">
+        <input type="file" id="mealPhotoLibraryInput" accept="image/*" style="display:none" onchange="handleMealPhotoSelected(event)">
 
         <div id="mealPhotoPreviewWrap" style="display:none;margin-top:10px;padding:10px;background:var(--bg);border:2px solid var(--border);border-radius:var(--radius-sm)">
           <img id="mealPhotoPreviewImg" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;display:block;margin-bottom:8px" alt="">
@@ -1830,7 +1837,7 @@ const FOOD_DB = [
     keywords: ['oatmeal', 'oats', 'オーツ'],
     defaultUnit: 'g', calorieBasis: { kcal: 380, per: 100, unit: 'g' }, approximate: true },
   { id: 'bread', name: '食パン', category: 'staple',
-    keywords: ['パン', 'bread', 'toast', '食パン'],
+    keywords: ['パン', 'bread', 'toast', 'トースト', '食パン'],
     defaultUnit: '枚', calorieBasis: { kcal: 158, per: 1, unit: '枚' }, approximate: true },
 
   // ---- protein ----
@@ -1941,7 +1948,14 @@ function findFoodByName(name) {
   if (!name) return null;
   const n = String(name).trim();
   if (!n) return null;
-  return FOOD_DB.find(f => f.name === n) || null;
+  const byName = FOOD_DB.find(f => f.name === n);
+  if (byName) return byName;
+  // Still exact-match only (no substring/fuzzy) — also accepts an exact match
+  // against a known keyword/synonym, so a common everyday word that isn't the
+  // FOOD_DB display name (e.g. "トースト" for the "食パン" entry) still
+  // matches safely and deterministically.
+  const nLower = n.toLowerCase();
+  return FOOD_DB.find(f => Array.isArray(f.keywords) && f.keywords.some(k => String(k).toLowerCase() === nLower)) || null;
 }
 
 // Pure calorie calculation for a single food-item object. Understands the
@@ -1981,6 +1995,14 @@ function calcMealTotal(foods) {
     }
   });
   return { totalCalories: anyKnown ? sum : null, hasEstimate };
+}
+
+// Keeps a food's stored .calories field in sync whenever its amount/unit
+// changes, by simply reusing calcCalories() — no separate calorie logic.
+// Manual overrides are left untouched (calcCalories already trusts them).
+function refreshStoredCalories(food) {
+  if (!food || food.calorieSource === 'manual') return;
+  food.calories = calcCalories(food);
 }
 
 // ===================== STAGE 1: SAFE FOOD MATCHING =====================
@@ -2733,9 +2755,12 @@ let mealPhotoDataUrl = null;   // downscaled JPEG data URL, or null if none sele
 let mealPhotoAnalyzing = false; // guards against duplicate concurrent analysis taps
 
 // Must be called synchronously from the tap handler for iOS to treat the
-// resulting file-input click as a trusted user gesture.
-function startMealPhotoCapture() {
-  const input = document.getElementById('mealPhotoInput');
+// resulting file-input click as a trusted user gesture. Shared by both the
+// camera button (mealPhotoCameraInput, capture="environment") and the photo
+// library button (mealPhotoLibraryInput, no capture) — both inputs share the
+// same onchange handler below, so there is one analysis pipeline, not two.
+function triggerMealPhotoInput(inputId) {
+  const input = document.getElementById(inputId);
   if (input) input.click();
 }
 
@@ -2931,10 +2956,14 @@ function editMealEvent(id) {
       origin: f.origin || null,
       confidence: f.confidence || null
     };
-    // Legacy food with no calorie info yet: try a safe match now, in this
-    // transient edit buffer only. Nothing is written back to storage unless
-    // the user then taps Save/Update.
-    return base.calorieSource ? base : enrichFoodWithDbMatch(base);
+    // Always re-run the safe match/enrichment on reopen (in this transient
+    // edit buffer only — nothing is written back to storage unless the user
+    // then taps Save/Update). This keeps a previously-matched food's stored
+    // calories from going stale, and gives an unmatched legacy food another
+    // chance if FOOD_DB matching has improved since it was saved.
+    // enrichFoodWithDbMatch() already leaves calorieSource:'manual' foods
+    // untouched, so manual overrides are still preserved exactly.
+    return enrichFoodWithDbMatch(base);
   });
   document.getElementById('mealEventType').value = ev.type || '';
   document.getElementById('mealEventTime').value = ev.time || '';
@@ -3048,6 +3077,7 @@ function renderMealEventChips() {
         mealEventFoods[i].portion = p;
         mealEventFoods[i].amount  = null;
         mealEventFoods[i].unit    = null;
+        refreshStoredCalories(mealEventFoods[i]);
         // collapse amount section
         const sec = wrapper.querySelector('.qty-section');
         if (sec) sec.style.display = 'none';
@@ -3116,6 +3146,7 @@ function renderMealEventChips() {
       mealEventFoods[i].unit    = mealEventFoods[i].unit || unitSel.value || 'g';
       // S/M/L を必ずクリア（数量があるとき）
       if (v !== '') mealEventFoods[i].portion = null;
+      refreshStoredCalories(mealEventFoods[i]);
       renderMealEventChips();
     };
     inputRow.appendChild(numInput);
@@ -3155,6 +3186,7 @@ function renderMealEventChips() {
           mealEventFoods[i].portion = null;
           mealEventFoods[i].unit    = unit;
           um[f.name] = unit; saveUnitMemory(um);
+          refreshStoredCalories(mealEventFoods[i]);
           renderMealEventChips();
         };
         quickRow.appendChild(qb);
@@ -3166,6 +3198,7 @@ function renderMealEventChips() {
       mealEventFoods[i].unit = unitSel.value;
       um[f.name] = unitSel.value;
       saveUnitMemory(um);
+      refreshStoredCalories(mealEventFoods[i]);
       const amt = mealEventFoods[i].amount;
       qBtn.textContent = amt != null ? amt + unitSel.value : '数量';
       buildQuickButtons();
