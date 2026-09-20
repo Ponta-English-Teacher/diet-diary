@@ -1958,6 +1958,26 @@ function findFoodByName(name) {
   return FOOD_DB.find(f => Array.isArray(f.keywords) && f.keywords.some(k => String(k).toLowerCase() === nLower)) || null;
 }
 
+// Normalizes a unit string for comparison only (trims + collapses full-width
+// ASCII variants a JSON/API/user field might contain). Does NOT attempt any
+// unit-family conversion (e.g. g<->kg, 個<->枚) — two units are either the
+// same unit or they're treated as incompatible. See unitsCompatible() below.
+function normalizeUnitStr(u) {
+  if (u == null) return '';
+  return String(u).trim().normalize('NFKC').toLowerCase();
+}
+
+// A food's amount is only meaningful together with the specific unit its
+// calorieBasis was defined in (e.g. "108 kcal per 100 g" says nothing about
+// "1 個"). Compatible only on an exact match after light normalization —
+// deliberately no unit-family conversion table, so a mismatch always falls
+// back to "unknown" rather than silently multiplying against the wrong unit.
+function unitsCompatible(foodUnit, basisUnit) {
+  const a = normalizeUnitStr(foodUnit);
+  const b = normalizeUnitStr(basisUnit);
+  return !!a && !!b && a === b;
+}
+
 // Pure calorie calculation for a single food-item object. Understands the
 // optional calorie fields documented above; returns null (unknown) whenever
 // there isn't enough information to compute a number — never guesses.
@@ -1968,6 +1988,7 @@ function calcCalories(food) {
   }
   const basis = food.calorieBasis;
   if (!basis || food.amount == null || food.amount === '') return null;
+  if (!unitsCompatible(food.unit, basis.unit)) return null;
   const amount = Number(food.amount);
   const kcal = Number(basis.kcal);
   const per = Number(basis.per);
@@ -3040,7 +3061,7 @@ function selectMealEventType(btn, val) {
 
 // ── last-used unit memory ──────────────────────────────────────────────────
 const UNIT_MEMORY_KEY = 'dietDiaryUnitMemory';
-const UNITS = ['g','ml','個','粒','枚','本','杯','切れ'];
+const UNITS = ['g','ml','個','粒','枚','本','杯','切れ','皿','人前'];
 
 function loadUnitMemory() {
   try { return JSON.parse(localStorage.getItem(UNIT_MEMORY_KEY)) || {}; } catch { return {}; }
@@ -3187,14 +3208,19 @@ function renderMealEventChips() {
 
     const unitSel = document.createElement('select');
     unitSel.style.cssText = 'padding:5px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif;cursor:pointer';
-    const defaultUnit = f.unit || um[f.name] || 'g';
+    // Prefer the matched FOOD_DB entry's own unit (the one its calorieBasis is
+    // actually defined in) over a blind "g" fallback — otherwise a count-based
+    // food like "ゆで卵" (per 1 個) would default the picker to grams, which
+    // unitsCompatible() would then correctly (but confusingly) treat as unknown.
+    const matchedUnit = (f.calorieBasis && f.calorieBasis.unit) || null;
+    const defaultUnit = f.unit || um[f.name] || matchedUnit || 'g';
     UNITS.forEach(u => {
       const opt = document.createElement('option');
       opt.value = u; opt.textContent = u;
       if (u === defaultUnit) opt.selected = true;
       unitSel.appendChild(opt);
     });
-    if (!f.unit && um[f.name]) {
+    if (!f.unit) {
       mealEventFoods[i].unit = defaultUnit;
     }
     // quick amount buttons (unit-aware) — defined before onchange so it can be called inside
@@ -3202,8 +3228,8 @@ function renderMealEventChips() {
     quickRow.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap';
 
     function quickValues(unit) {
-      if (unit === '粒')                           return [5,10,20,30,50];
-      if (['個','枚','本','杯','切れ'].includes(unit)) return [1,2,3,4,5,6];
+      if (unit === '粒')                                 return [5,10,20,30,50];
+      if (['個','枚','本','杯','切れ','皿','人前'].includes(unit)) return [1,2,3,4,5,6];
       return [50,100,150,200,250,300]; // g / ml / default
     }
 
@@ -3233,9 +3259,11 @@ function renderMealEventChips() {
       um[f.name] = unitSel.value;
       saveUnitMemory(um);
       refreshStoredCalories(mealEventFoods[i]);
-      const amt = mealEventFoods[i].amount;
-      qBtn.textContent = amt != null ? amt + unitSel.value : '数量';
-      buildQuickButtons();
+      // Re-render (like every other quantity-editing handler here) so the
+      // calorie subline and meal total reflect the new unit immediately —
+      // patching qBtn/quickRow in place left the displayed calorie and total
+      // stale until some other change happened to trigger a fuller re-render.
+      renderMealEventChips();
     };
 
     inputRow.appendChild(unitSel);
