@@ -2168,6 +2168,63 @@ function formatFoodCalorieDisplay(f) {
   return { text: (f.isEstimated ? '≈' : '') + cal + ' kcal', cls: f.isEstimated ? 'estimated' : 'known' };
 }
 
+// The single source of truth for how a MEAL's total calorie line reads,
+// used identically by the live editor, the Day-view card, the meal modal's
+// saved list, and the plain-text export (buildDayText()) — so "complete",
+// "incomplete subtotal", and "nothing calculated" are never worded
+// differently in different places.
+//
+// wholeMealCheck (optional) is the saved result of the whole-photo
+// plausibility re-check (see runWholeMealPlausibilityCheck()). Critically:
+// a component sum that the whole-photo check flagged as implausibly low is
+// NOT a trustworthy total, even if every individual food resolved — so
+// subtotalLooksLow forces the 計算済み小計 (subtotal) label instead of
+// 食事合計 (meal total) in that case too, never just when something is
+// still unresolved. The independent range is always an ADDED line, never a
+// silent replacement of the component-based number.
+function formatMealTotalLines(foods, wholeMealCheck) {
+  const { totalCalories, hasEstimate, isComplete } = calcMealTotal(foods);
+  const lines = [];
+
+  const flaggedLow = !!(wholeMealCheck && wholeMealCheck.subtotalLooksLow
+    && typeof wholeMealCheck.estimateLow === 'number' && typeof wholeMealCheck.estimateHigh === 'number');
+
+  if (totalCalories == null) {
+    lines.push('カロリー未計算');
+  } else if (isComplete && !flaggedLow) {
+    lines.push(`食事合計: ${hasEstimate ? '約' : ''}${totalCalories} kcal`);
+  } else {
+    lines.push(`計算済み小計: 約${totalCalories} kcal`);
+    if (!isComplete) lines.push('未計算の食品あり');
+  }
+
+  if (flaggedLow) {
+    lines.push(`写真全体の推定: 約${wholeMealCheck.estimateLow}〜${wholeMealCheck.estimateHigh} kcal`);
+  }
+
+  return { lines, isComplete: isComplete && totalCalories != null && !flaggedLow, isEmpty: totalCalories == null };
+}
+
+// HTML rendering of formatMealTotalLines() shared by the live editor, the
+// Day-view card, and the meal modal's saved list — a warning color for
+// "未計算の食品あり" (incomplete) and the purple already used for AI-sourced
+// values for the "写真全体の推定" reconciliation line, so all three read
+// identically.
+function buildMealTotalHtml(foods, wholeMealCheck, fontSize) {
+  const { lines, isEmpty } = formatMealTotalLines(foods, wholeMealCheck);
+  return lines.map((line, idx) => {
+    let style = `font-weight:700;font-size:${fontSize}px;`;
+    if (idx === 0) {
+      style += isEmpty ? 'color:var(--text-muted);font-style:italic' : 'color:var(--text-sub)';
+    } else if (line.indexOf('写真全体の推定') === 0) {
+      style += 'color:var(--purple);margin-top:2px';
+    } else {
+      style += 'color:#c04040;margin-top:2px';
+    }
+    return `<div style="${style}">${escHtml(line)}</div>`;
+  }).join('');
+}
+
 // Keeps a food's stored .calories field in sync whenever its amount/unit
 // changes, by simply reusing calcCalories() — no separate calorie logic.
 // Manual overrides are left untouched (calcCalories already trusts them).
@@ -2221,6 +2278,7 @@ function renameFoodInEditor(index, newName) {
   if (wasEditorOpen) foodEditorOpen.add(mealEventFoods[index]);
   if (wasCalExpanded) manualCalExpanded.add(mealEventFoods[index]);
   maybeEstimateFoodCalories(index);
+  invalidateWholeMealCheck();
   renderMealEventChips();
 }
 
@@ -2266,9 +2324,13 @@ function enrichFoodWithDbMatch(food) {
 // response can be safely discarded once it's stale: the food was removed
 // from the meal, superseded by a newer request, or the user switched it to
 // manual/a DB match in the meantime.
-const aiEstimateTimers  = new WeakMap(); // food -> pending debounce timer id
-const aiEstimateGen     = new WeakMap(); // food -> request generation counter
-const aiEstimatePending = new WeakSet(); // food -> has an in-flight/queued request
+const aiEstimateTimers    = new WeakMap(); // food -> pending debounce timer id
+const aiEstimateGen       = new WeakMap(); // food -> request generation counter
+const aiEstimatePending   = new WeakSet(); // food -> has an in-flight/queued request
+// Lets saveMealEvent() wait for a food's estimate to actually settle instead
+// of snapshotting it mid-flight — see cancelAiEstimate()/maybeEstimateFoodCalories().
+const aiEstimatePromises  = new WeakMap(); // food -> Promise that resolves once settled
+const aiEstimateResolvers = new WeakMap(); // food -> that Promise's resolve function
 const AI_ESTIMATE_DEBOUNCE_MS = 700;
 
 // Manual calorie entry is an override, not the normal workflow, so its input
@@ -2289,6 +2351,19 @@ function cancelAiEstimate(food) {
   const t = aiEstimateTimers.get(food);
   if (t) { clearTimeout(t); aiEstimateTimers.delete(food); }
   aiEstimatePending.delete(food);
+  // A cancelled timer's executor never runs, so its promise would otherwise
+  // hang forever — resolve it now so anything awaiting it (saveMealEvent())
+  // doesn't block on an estimate that was abandoned, not settled.
+  const resolve = aiEstimateResolvers.get(food);
+  if (resolve) { aiEstimateResolvers.delete(food); resolve(); }
+}
+
+// Resolves once the given food's calorie state is no longer "pending" —
+// either an estimate came back (success or failure) or it was cancelled.
+// Foods that were never pending resolve immediately. Used by saveMealEvent()
+// to wait out in-flight estimates instead of saving a food mid-calculation.
+function waitForFoodCalorieSettled(food) {
+  return aiEstimatePending.has(food) ? (aiEstimatePromises.get(food) || Promise.resolve()) : Promise.resolve();
 }
 
 async function requestAiCalorieEstimate(payload) {
@@ -2359,36 +2434,43 @@ function maybeEstimateFoodCalories(index) {
   aiEstimateGen.set(food, gen);
   aiEstimatePending.add(food);
 
-  const timer = setTimeout(async () => {
-    aiEstimateTimers.delete(food);
-    const payload = hasQty
-      ? { name: food.name, unit: food.unit }
-      : { name: food.name, portion: food.portion };
-    const result = await requestAiCalorieEstimate(payload);
+  aiEstimatePromises.set(food, new Promise(resolvePromise => {
+    aiEstimateResolvers.set(food, resolvePromise);
 
-    // Discard a stale response rather than apply it.
-    if (aiEstimateGen.get(food) !== gen) return;
-    if (!mealEventFoods.includes(food)) return;
-    aiEstimatePending.delete(food);
-    // Something else already answered this while the request was in flight
-    // (switched to manual, or a DB self-heal resolved it) — don't clobber it.
-    if (food.calorieSource === 'manual' || calcCalories(food) != null) { renderMealEventChips(); return; }
+    const timer = setTimeout(async () => {
+      aiEstimateTimers.delete(food);
+      const payload = hasQty
+        ? { name: food.name, unit: food.unit }
+        : { name: food.name, portion: food.portion };
+      const result = await requestAiCalorieEstimate(payload);
 
-    if (result && result.ok && typeof result.kcal === 'number' && isFinite(result.kcal)) {
-      food.calorieBasis = (result.mode === 'flat')
-        ? { kcal: result.kcal, portion: food.portion }
-        : { kcal: result.kcal, per: result.per, unit: result.unit };
-      food.calorieSource = 'ai';
-      food.isEstimated = true;
-      food.calories = calcCalories(food);
-    } else {
-      // Estimation failed or came back "can't estimate" — leave unknown,
-      // never store 0 kcal for a food that just couldn't be estimated.
-      food.calorieSource = null; food.calorieBasis = null; food.calories = null; food.isEstimated = false;
-    }
-    renderMealEventChips();
-  }, AI_ESTIMATE_DEBOUNCE_MS);
-  aiEstimateTimers.set(food, timer);
+      // Discard a stale response rather than apply it.
+      if (aiEstimateGen.get(food) !== gen) { resolvePromise(); return; }
+      const stillPresent = mealEventFoods.includes(food);
+      aiEstimatePending.delete(food);
+      aiEstimateResolvers.delete(food);
+      if (!stillPresent) { resolvePromise(); return; }
+      // Something else already answered this while the request was in flight
+      // (switched to manual, or a DB self-heal resolved it) — don't clobber it.
+      if (food.calorieSource === 'manual' || calcCalories(food) != null) { renderMealEventChips(); resolvePromise(); return; }
+
+      if (result && result.ok && typeof result.kcal === 'number' && isFinite(result.kcal)) {
+        food.calorieBasis = (result.mode === 'flat')
+          ? { kcal: result.kcal, portion: food.portion }
+          : { kcal: result.kcal, per: result.per, unit: result.unit };
+        food.calorieSource = 'ai';
+        food.isEstimated = true;
+        food.calories = calcCalories(food);
+      } else {
+        // Estimation failed or came back "can't estimate" — leave unknown,
+        // never store 0 kcal for a food that just couldn't be estimated.
+        food.calorieSource = null; food.calorieBasis = null; food.calories = null; food.isEstimated = false;
+      }
+      renderMealEventChips();
+      resolvePromise();
+    }, AI_ESTIMATE_DEBOUNCE_MS);
+    aiEstimateTimers.set(food, timer);
+  }));
 }
 
 // ===================== STAGE 2: SEARCH / SUGGESTIONS / STATS =====================
@@ -2512,6 +2594,7 @@ function addFoodByName(name) {
   } else {
     mealEventFoods.push(enrichFoodWithDbMatch({ name: trimmed, portion: '', amount: null, unit: null }));
     maybeEstimateFoodCalories(mealEventFoods.length - 1);
+    invalidateWholeMealCheck();
     renderMealEventChips();
   }
   const input = document.getElementById('foodSearchInput');
@@ -2669,6 +2752,11 @@ let monthChartInst = null;
 // meal event state
 let mealEventFoods = [];   // [{name, portion}]
 let editingMealEventId = null;
+// Result of the whole-photo plausibility re-check for the meal currently
+// being edited ({estimateLow, estimateHigh, subtotalLooksLow} or null).
+// Meal-event-level (not per-food) — see runWholeMealPlausibilityCheck() and
+// formatMealTotalLines(). Persisted on the saved record as ev.wholeMealCheck.
+let currentWholeMealCheck = null;
 
 // ===================== DATE UTILS =====================
 function localDateStr(d) {
@@ -2843,9 +2931,8 @@ function renderInlineMealFeed(rec) {
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="inline-meal-note">${escHtml(ev.note)}</div>` : '';
-    const { totalCalories, hasEstimate, isComplete } = calcMealTotal(ev.foods || []);
-    const calHtml = totalCalories != null
-      ? `<div style="font-size:11px;font-weight:700;color:var(--text-sub);margin-top:4px">食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal${isComplete ? '' : '（一部未計算）'}</div>`
+    const calHtml = (ev.foods && ev.foods.length)
+      ? `<div style="margin-top:4px">${buildMealTotalHtml(ev.foods, ev.wholeMealCheck, 11)}</div>`
       : '';
     return `<div class="inline-meal-card">
       <div class="inline-meal-top">
@@ -3087,9 +3174,8 @@ function renderMealEventList() {
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="meal-event-note">${escHtml(ev.note)}</div>` : '';
-    const { totalCalories, hasEstimate, isComplete } = calcMealTotal(ev.foods || []);
-    const calHtml = totalCalories != null
-      ? `<div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-top:6px">食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal${isComplete ? '' : '（一部未計算）'}</div>`
+    const calHtml = (ev.foods && ev.foods.length)
+      ? `<div style="margin-top:6px">${buildMealTotalHtml(ev.foods, ev.wholeMealCheck, 12)}</div>`
       : '';
     return `<div class="meal-event-card">
       <div class="meal-event-card-header">
@@ -3270,6 +3356,58 @@ function applyDetectedItems(items) {
   return added;
 }
 
+// A whole-photo re-estimate is only valid for the exact food list it was
+// computed from — call this whenever mealEventFoods changes so a stale range
+// never lingers next to a meal that's since been edited (rather than trying
+// to guess whether an edit invalidated it).
+function invalidateWholeMealCheck() {
+  if (currentWholeMealCheck) {
+    currentWholeMealCheck = null;
+    renderMealEventTotal();
+  }
+}
+
+// Independent whole-photo calorie sanity check (see api/estimate-meal-total.js).
+// Best-effort and fully in the background: never blocks the photo-analysis
+// flow, never touches any food's own calorie fields, and never overwrites
+// the component-based subtotal — it only ADDS a reconciliation line via
+// formatMealTotalLines() when the two disagree. Silently does nothing on
+// any failure (no API key configured, network error, photo too large, etc.)
+// since this is a supplementary check, not a required part of the pipeline.
+async function runWholeMealPlausibilityCheck(photoDataUrl, detectedItems) {
+  try {
+    // Wait out any per-item estimates the photo just triggered, so the
+    // subtotal sent for comparison is the real final one, not mid-flight.
+    const pending = mealEventFoods.filter(f => aiEstimatePending.has(f));
+    if (pending.length) await Promise.all(pending.map(waitForFoodCalorieSettled));
+
+    const { totalCalories } = calcMealTotal(mealEventFoods);
+    const resp = await fetch('/api/estimate-meal-total', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: photoDataUrl,
+        items: (Array.isArray(detectedItems) ? detectedItems : []).map(it => ({
+          name: it && it.name, amount: it && it.amount, unit: it && it.unit
+        })),
+        subtotalKcal: totalCalories
+      })
+    });
+    const json = await resp.json().catch(() => null);
+    if (!resp.ok || !json || json.ok !== true) return;
+    if (typeof json.estimateLow !== 'number' || typeof json.estimateHigh !== 'number') return;
+
+    currentWholeMealCheck = {
+      estimateLow: json.estimateLow,
+      estimateHigh: json.estimateHigh,
+      subtotalLooksLow: json.subtotalLooksLow === true
+    };
+    renderMealEventTotal();
+  } catch (e) {
+    // Sanity check only — never surfaces an error to the user.
+  }
+}
+
 async function analyzeMealPhotoNow() {
   if (mealPhotoAnalyzing || !mealPhotoDataUrl) return;
   mealPhotoAnalyzing = true;
@@ -3287,6 +3425,12 @@ async function analyzeMealPhotoNow() {
     showToast(added ? '写真から食品を追加しました。内容を確認してください' : '食品を検出できませんでした');
     cleanupMealPhotoState();
     renderMealPhotoPreview();
+    if (added) {
+      // Best-effort whole-photo sanity check, run in the background — never
+      // blocks this flow. photoToAnalyze is captured here (before
+      // cleanupMealPhotoState() just cleared mealPhotoDataUrl above).
+      runWholeMealPlausibilityCheck(photoToAnalyze, items);
+    }
   } catch (e) {
     resetMealPhotoAnalyzingUI();
     showToast('写真の解析に失敗しました。手動で入力してください');
@@ -3295,6 +3439,7 @@ async function analyzeMealPhotoNow() {
 
 function startNewMealEvent() {
   editingMealEventId = null;
+  currentWholeMealCheck = null;
   mealEventFoods = [];
   document.getElementById('mealEventType').value = '';
   document.getElementById('mealEventTime').value = '';
@@ -3319,6 +3464,9 @@ function editMealEvent(id) {
   const ev  = rec.mealEvents.find(e => e.id === id);
   if (!ev) return;
   editingMealEventId = id;
+  // Restored as-is (not re-validated) — it's just a display annotation from
+  // the last photo analysis. Food-list edits below invalidate it.
+  currentWholeMealCheck = ev.wholeMealCheck || null;
   mealEventFoods = (ev.foods || []).map(f => {
     const base = {
       name: f.name,
@@ -3833,6 +3981,7 @@ function renderMealEventChips() {
       document.querySelectorAll('.meal-preset-tag').forEach(btn => {
         if (btn.textContent === f.name) btn.classList.remove('selected');
       });
+      invalidateWholeMealCheck();
       renderMealEventChips();
     };
     card.appendChild(rb);
@@ -3852,12 +4001,33 @@ function renderMealEventChips() {
 function renderMealEventTotal() {
   const el = document.getElementById('mealEventTotalCalories');
   if (!el) return;
-  const { totalCalories, hasEstimate, isComplete } = calcMealTotal(mealEventFoods);
-  el.textContent = (totalCalories == null) ? '' :
-    ('合計: ' + (hasEstimate ? '≈' : '') + totalCalories + ' kcal' + (isComplete ? '' : '（一部未計算）'));
+  // No foods added yet on an otherwise-empty form — nothing to say about
+  // calories yet, so stay blank rather than show "カロリー未計算" prematurely.
+  if (!mealEventFoods.length) { el.innerHTML = ''; return; }
+  el.innerHTML = buildMealTotalHtml(mealEventFoods, currentWholeMealCheck, 13);
 }
 
-function saveMealEvent() {
+let mealSaveInProgress = false;
+
+// Waits out any still-in-flight AI calorie estimates before snapshotting the
+// meal, so Save can never silently lock in "unknown" for a food that would
+// have resolved a moment later (see waitForFoodCalorieSettled()). If an
+// estimate genuinely fails, that's fine — Save proceeds and the meal is
+// correctly marked incomplete via calcMealTotal()'s isComplete flag, exactly
+// as if the food had been unresolved for any other reason.
+async function saveMealEvent() {
+  if (mealSaveInProgress) return;
+  mealSaveInProgress = true;
+
+  const saveBtn = document.getElementById('mealEventSaveBtn');
+  const originalBtnText = saveBtn ? saveBtn.textContent : '';
+  const pendingFoods = mealEventFoods.filter(f => aiEstimatePending.has(f));
+  if (pendingFoods.length) {
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'カロリーを計算中…'; }
+    await Promise.all(pendingFoods.map(waitForFoodCalorieSettled));
+    if (saveBtn) { saveBtn.textContent = originalBtnText; }
+  }
+
   const type  = document.getElementById('mealEventType').value || '食事';
   const time  = document.getElementById('mealEventTime').value;
   const note  = document.getElementById('mealEventNote').value.trim();
@@ -3868,10 +4038,10 @@ function saveMealEvent() {
 
   if (editingMealEventId) {
     const idx = rec.mealEvents.findIndex(e => e.id === editingMealEventId);
-    if (idx !== -1) rec.mealEvents[idx] = { ...rec.mealEvents[idx], type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate, totalIsComplete: isComplete };
+    if (idx !== -1) rec.mealEvents[idx] = { ...rec.mealEvents[idx], type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate, totalIsComplete: isComplete, wholeMealCheck: currentWholeMealCheck };
     showToast('食事を更新しました');
   } else {
-    rec.mealEvents.push({ id: uid(), type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate, totalIsComplete: isComplete });
+    rec.mealEvents.push({ id: uid(), type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate, totalIsComplete: isComplete, wholeMealCheck: currentWholeMealCheck });
     showToast('食事を保存しました');
   }
 
@@ -3881,6 +4051,9 @@ function saveMealEvent() {
   renderDay();
   hideMealEventForm();
   renderMealEventList();
+
+  if (saveBtn) saveBtn.disabled = false;
+  mealSaveInProgress = false;
 }
 
 // ===================== ALCOHOL: STAGE A FOUNDATIONS =====================
@@ -4418,10 +4591,8 @@ function buildDayText(dateStr) {
       });
       const t = ev.time ? ` (${ev.time})` : '';
       const noteLine = ev.note ? `\n${ev.note}` : '';
-      const { totalCalories, hasEstimate, isComplete } = calcMealTotal(foods);
-      const totalLine = totalCalories != null
-        ? `\n食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal${isComplete ? '' : '（一部未計算）'}`
-        : '';
+      const { lines: totalLines } = formatMealTotalLines(foods, ev.wholeMealCheck);
+      const totalLine = foods.length ? `\n${totalLines.join('\n')}` : '';
       const body = foodLines.length ? foodLines.join('\n') : '未記入';
       return `${ev.type || '食事'}${t}\n${body}${noteLine}${totalLine}`;
     });
@@ -4432,21 +4603,32 @@ function buildDayText(dateStr) {
     // shown as 0) when no meal that day has any known calorie information.
     // dayIsComplete is false whenever ANY meal has a food with no calorie
     // info at all, so a day is never mistaken for a genuinely low-calorie day
-    // just because some foods weren't estimated (see calcMealTotal()).
+    // just because some foods weren't estimated (see calcMealTotal()). Same
+    // reasoning for dayHasLowFlag: it doesn't attempt to combine per-meal
+    // whole-photo ranges into one day-wide range (compounding two independent
+    // photo re-estimates would just manufacture false precision) — it only
+    // notes that at least one meal's subtotal was flagged as implausibly low,
+    // pointing back at that meal's own detail for the actual range.
     let dayTotal = 0;
     let dayHasKnown = false;
     let dayHasEstimate = false;
     let dayIsComplete = true;
+    let dayHasLowFlag = false;
     r.mealEvents.forEach(ev => {
-      const { totalCalories, hasEstimate, isComplete } = calcMealTotal((ev.foods || []).filter(f => f.name));
+      const evFoods = (ev.foods || []).filter(f => f.name);
+      const { totalCalories, hasEstimate, isComplete } = calcMealTotal(evFoods);
       if (totalCalories != null) { dayTotal += totalCalories; dayHasKnown = true; }
       if (hasEstimate) dayHasEstimate = true;
-      if (!isComplete) dayIsComplete = false;
+      if (evFoods.length && !isComplete) dayIsComplete = false;
+      if (ev.wholeMealCheck && ev.wholeMealCheck.subtotalLooksLow) dayHasLowFlag = true;
     });
     if (dayHasKnown) {
       const totalStr = Math.round(dayTotal).toLocaleString('ja-JP');
       const caveatLine = dayIsComplete ? '' : '\n（一部の食品は未計算）';
-      lines.push(`■1日の摂取カロリー\n推定合計: ${dayHasEstimate ? '≈' : ''}${totalStr} kcal${caveatLine}\n`);
+      const lowFlagLine = dayHasLowFlag ? '\n（写真からの推定より低い可能性がある食事があります。詳細は各食事を参照）' : '';
+      lines.push(`■1日の摂取カロリー\n推定合計: ${dayHasEstimate ? '約' : ''}${totalStr} kcal${caveatLine}${lowFlagLine}\n`);
+    } else {
+      lines.push(`■1日の摂取カロリー\nカロリー未計算\n`);
     }
   }
   const alcEvents = r.alcoholEvents || [];

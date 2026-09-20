@@ -24,6 +24,18 @@ Look at the meal photo and identify the distinct food items visible.
 For each item, estimate a reasonable serving amount and a simple unit
 (use grams "g" for most foods, or a countable unit like "個" for things like eggs).
 Use common Japanese food names (e.g. 鶏むね肉, 豆腐, ご飯, サラダ).
+
+Composite dishes: if the photo shows a single recognizable composite dish
+(examples: カレーライス, 牛丼, 親子丼, ラーメン, ハンバーグ, とんかつ, パスタ,
+チャーハン), list it as ONE item using its own name — do NOT split it into
+its base ingredients (e.g. do not list "ご飯" and "カレー" separately for a
+curry rice plate). Splitting a composite dish into ingredients tends to
+under-count its true calories, since a simple ingredient breakdown misses
+sauce, oil, and how the parts combine. Only list separate items when they are
+genuinely separate foods on the plate (e.g. a curry-rice set with a distinct
+side salad and miso soup should list all three, but the curry and rice
+themselves stay one "カレーライス" item, not two).
+
 Do NOT estimate or mention calories — that is calculated separately.
 Respond with ONLY a JSON object in exactly this shape, no other text:
 {"items":[{"name":"string","amount":number,"unit":"string","confidence":"high"|"medium"|"low"}]}
