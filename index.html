@@ -982,8 +982,15 @@
 
   .inline-meal-foods {
     display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .inline-food-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
 
   .inline-food-tag {
@@ -997,6 +1004,7 @@
     font-size: 12px;
     font-weight: 600;
     color: var(--text);
+    min-width: 0;
   }
 
   .inline-food-portion {
@@ -1009,6 +1017,18 @@
   .ifp-s { background: #d4f5e9; color: #2a9d6a; }
   .ifp-m { background: #fef3d0; color: #b8820a; }
   .ifp-l { background: #fde0e0; color: #c04040; }
+
+  /* per-food calorie, shown next to the food tag in the saved Day-view card
+     and the meal modal's saved list (formatFoodCalorieDisplay() classes) */
+  .inline-food-cal, .meal-event-food-cal {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-sub);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .inline-food-cal.estimated, .meal-event-food-cal.estimated { color: #b8820a; }
+  .inline-food-cal.unknown, .meal-event-food-cal.unknown { color: var(--text-muted); font-weight: 600; font-style: italic; }
 
   .inline-meal-note {
     font-size: 11px;
@@ -2018,6 +2038,16 @@ function calcMealTotal(foods) {
   return { totalCalories: anyKnown ? sum : null, hasEstimate };
 }
 
+// Pure display formatting for a single saved food's calorie, built only on
+// top of calcCalories() — used by every read-only saved-meal view (Day-view
+// inline card, the meal modal's saved list, …) so they all agree with the
+// live editor and with each other. Never mutates the food or touches storage.
+function formatFoodCalorieDisplay(f) {
+  const cal = calcCalories(f);
+  if (cal == null) return { text: '— kcal', cls: 'unknown' };
+  return { text: (f.isEstimated ? '≈' : '') + cal + ' kcal', cls: f.isEstimated ? 'estimated' : 'known' };
+}
+
 // Keeps a food's stored .calories field in sync whenever its amount/unit
 // changes, by simply reusing calcCalories() — no separate calorie logic.
 // Manual overrides are left untouched (calcCalories already trusts them).
@@ -2526,13 +2556,17 @@ function renderInlineMealFeed(rec) {
           } else if (p) {
             badge = `<span class="inline-food-portion ${portionCls[p]}">${portionLabel[p]}</span>`;
           }
-          return `<span class="inline-food-tag">${escHtml(f.name)}${badge}</span>`;
+          const { text: calText, cls: calCls } = formatFoodCalorieDisplay(f);
+          return `<div class="inline-food-row">
+            <span class="inline-food-tag">${escHtml(f.name)}${badge}</span>
+            <span class="inline-food-cal ${calCls}">${calText}</span>
+          </div>`;
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="inline-meal-note">${escHtml(ev.note)}</div>` : '';
     const { totalCalories, hasEstimate } = calcMealTotal(ev.foods || []);
     const calHtml = totalCalories != null
-      ? `<div style="font-size:11px;font-weight:700;color:var(--text-sub);margin-top:4px">🔥 ${hasEstimate ? '≈' : ''}${totalCalories} kcal</div>`
+      ? `<div style="font-size:11px;font-weight:700;color:var(--text-sub);margin-top:4px">食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal</div>`
       : '';
     return `<div class="inline-meal-card">
       <div class="inline-meal-top">
@@ -2763,16 +2797,20 @@ function renderMealEventList() {
           } else if (p) {
             pLabel = `<span class="meal-event-portion ${portionClass[p]}">${portionLabel[p]}</span>`;
           }
+          const { text: calText, cls: calCls } = formatFoodCalorieDisplay(f);
           return `<div class="meal-event-food-row">
             <span class="meal-event-food-name">${escHtml(f.name)}</span>
-            ${pLabel}
+            <span style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              ${pLabel}
+              <span class="meal-event-food-cal ${calCls}">${calText}</span>
+            </span>
           </div>`;
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="meal-event-note">${escHtml(ev.note)}</div>` : '';
     const { totalCalories, hasEstimate } = calcMealTotal(ev.foods || []);
     const calHtml = totalCalories != null
-      ? `<div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-top:6px">🔥 ${hasEstimate ? '≈' : ''}${totalCalories} kcal</div>`
+      ? `<div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-top:6px">食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal</div>`
       : '';
     return `<div class="meal-event-card">
       <div class="meal-event-card-header">
