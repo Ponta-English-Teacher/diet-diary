@@ -2188,6 +2188,16 @@ function renameFoodInEditor(index, newName) {
   const food = mealEventFoods[index];
   if (!food) return;
   if (!trimmed || trimmed === food.name) { renderMealEventChips(); return; }
+  // Prevent accidental double-counting: renaming into another selected
+  // food's exact name would silently create two entries with the same name,
+  // both contributing to the total. Block it (same message addFoodByName()
+  // already uses for the equivalent add-time case) rather than attempting
+  // any "clever" merge.
+  if (mealEventFoods.some((f, idx) => idx !== index && f.name === trimmed)) {
+    showToast('すでに追加されています');
+    renderMealEventChips();
+    return;
+  }
 
   const isManualOverride = food.calorieSource === 'manual';
   const updated = {
@@ -2200,7 +2210,16 @@ function renameFoodInEditor(index, newName) {
     calories: isManualOverride ? food.calories : null
   };
 
+  // A rename replaces the food object (new identity), which would otherwise
+  // orphan any WeakSet-keyed UI state (the correction editor being open, the
+  // manual-override input being expanded) — carry it over so committing a
+  // rename doesn't make its own editor appear to snap shut.
+  const wasEditorOpen = foodEditorOpen.has(food);
+  const wasCalExpanded = manualCalExpanded.has(food);
+
   mealEventFoods[index] = enrichFoodWithDbMatch(updated);
+  if (wasEditorOpen) foodEditorOpen.add(mealEventFoods[index]);
+  if (wasCalExpanded) manualCalExpanded.add(mealEventFoods[index]);
   maybeEstimateFoodCalories(index);
   renderMealEventChips();
 }
@@ -2257,6 +2276,14 @@ const AI_ESTIMATE_DEBOUNCE_MS = 700;
 // off-object, identity-keyed pattern as the AI state above — purely a UI
 // expand/collapse flag, never persisted.
 const manualCalExpanded = new WeakSet();
+
+// Which food's full correction/quantity editor panel is currently open.
+// Object-identity-keyed (not index-keyed) so it survives foods being
+// added/removed elsewhere in the list without pointing at the wrong row.
+// A rename replaces the food object (see renameFoodInEditor()), which
+// carries membership over to the new object so the editor doesn't appear to
+// snap shut the moment the user picks a suggestion or types a custom name.
+const foodEditorOpen = new WeakSet();
 
 function cancelAiEstimate(food) {
   const t = aiEstimateTimers.get(food);
@@ -3376,6 +3403,350 @@ function saveUnitMemory(mem) {
   localStorage.setItem(UNIT_MEMORY_KEY, JSON.stringify(mem));
 }
 
+// Sets a calorie-result element's text/color from a food's current state —
+// shared by the compact card summary and the editor panel's live result, so
+// they can never disagree about what's currently known.
+function applyCalorieSpanState(el, food) {
+  if (aiEstimatePending.has(food)) {
+    el.textContent = '推定中…';
+    el.style.color = 'var(--purple)';
+    el.style.fontStyle = 'italic';
+    el.style.fontWeight = '600';
+    return;
+  }
+  const { text, cls } = formatFoodCalorieDisplay(food);
+  el.textContent = text;
+  el.style.fontStyle = 'normal';
+  if (cls === 'unknown') { el.style.color = 'var(--text-muted)'; el.style.fontStyle = 'italic'; el.style.fontWeight = '600'; }
+  else if (cls === 'ai') { el.style.color = 'var(--purple)'; el.style.fontWeight = '700'; }
+  else if (cls === 'estimated') { el.style.color = '#b8820a'; el.style.fontWeight = '700'; }
+  else { el.style.color = 'var(--text-sub)'; el.style.fontWeight = '700'; }
+}
+
+// The full per-food correction/quantity editor (Stage 2). Reuses
+// getFoodSuggestions() — the exact same ranking logic the top-level food
+// search uses — for the "候補" list, and renameFoodInEditor()/
+// enrichFoodWithDbMatch()/calcCalories() for everything else, so this is
+// still one common pipeline, not a second matching/calorie system.
+//
+// Typing in the name or amount field NEVER triggers a full
+// renderMealEventChips() rebuild — only a targeted update of the candidates
+// list / calorie result — so the input's focus, cursor position, and the
+// iPhone keyboard are never disturbed mid-keystroke. Every other action
+// here (picking a candidate, S/M/L, unit, quick-amount, manual override,
+// 完了) is a discrete tap, where a full re-render is safe and simplest.
+function buildFoodEditorPanel(f, i, um) {
+  const panel = document.createElement('div');
+  panel.dataset.editorIndex = String(i);
+  panel.style.cssText = 'margin-top:6px;padding:14px;background:var(--bg);border:2px solid var(--border);border-radius:12px';
+
+  const sectionLabel = text => {
+    const el = document.createElement('div');
+    el.textContent = text;
+    el.style.cssText = 'font-size:11px;font-weight:700;color:var(--text-sub);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px';
+    return el;
+  };
+
+  // ── 食品名 ────────────────────────────────────────────────────────────
+  panel.appendChild(sectionLabel('食品名'));
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.value = f.name;
+  nameInput.autocomplete = 'off';
+  nameInput.style.cssText = 'width:100%;padding:12px 14px;min-height:44px;font-size:16px;font-weight:700;color:var(--text);background:var(--card);border:2px solid var(--accent);border-radius:10px;outline:none;font-family:\'Noto Sans JP\',sans-serif;box-sizing:border-box;margin-bottom:10px';
+  panel.appendChild(nameInput);
+
+  // ── 候補 ──────────────────────────────────────────────────────────────
+  panel.appendChild(sectionLabel('候補'));
+  const candBox = document.createElement('div');
+  candBox.style.cssText = 'display:flex;flex-wrap:wrap;gap:7px;min-height:20px;margin-bottom:12px';
+  panel.appendChild(candBox);
+
+  let suppressBlurCommit = false;
+
+  function refreshCandidates(query) {
+    candBox.innerHTML = '';
+    const q = String(query || '').trim();
+    if (!q) return;
+    const { items } = getFoodSuggestions(q, 6);
+    if (!items.length) {
+      const none = document.createElement('div');
+      none.textContent = '候補なし（このまま確定すると未登録の食品として保存されます）';
+      none.style.cssText = 'font-size:12px;color:var(--text-muted);font-style:italic';
+      candBox.appendChild(none);
+      return;
+    }
+    items.forEach(item => {
+      const isCurrent = item.name === mealEventFoods[i].name;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = item.name;
+      b.style.cssText = 'padding:9px 15px;min-height:40px;border-radius:20px;'
+        + 'border:2px solid ' + (isCurrent ? 'var(--primary)' : 'var(--border)') + ';'
+        + 'background:' + (isCurrent ? 'var(--primary-light)' : 'var(--card)') + ';'
+        + 'color:' + (isCurrent ? 'white' : 'var(--text)') + ';'
+        + "font-family:'Noto Sans JP',sans-serif;font-size:14px;font-weight:600;cursor:pointer";
+      // mousedown fires before the input's blur — suppresses the blur-commit
+      // below so it can't race in a stale, half-typed value first.
+      b.onmousedown = () => { suppressBlurCommit = true; };
+      b.onclick = () => { renameFoodInEditor(i, item.name); };
+      candBox.appendChild(b);
+    });
+  }
+  nameInput.oninput = () => { refreshCandidates(nameInput.value); };
+  nameInput.onblur = () => {
+    if (suppressBlurCommit) { suppressBlurCommit = false; return; }
+    const typed = nameInput.value.trim();
+    if (typed && typed !== mealEventFoods[i].name) renameFoodInEditor(i, typed);
+  };
+  refreshCandidates(f.name);
+
+  // ── 量 ────────────────────────────────────────────────────────────────
+  panel.appendChild(sectionLabel('量'));
+  const qtyRow = document.createElement('div');
+  qtyRow.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
+
+  const amountInput = document.createElement('input');
+  amountInput.type = 'number';
+  amountInput.placeholder = '数量';
+  amountInput.value = f.amount != null ? f.amount : '';
+  amountInput.style.cssText = 'width:110px;padding:11px 12px;min-height:44px;border:2px solid var(--border);border-radius:10px;font-size:16px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:\'Noto Sans JP\',sans-serif;box-sizing:border-box';
+  qtyRow.appendChild(amountInput);
+
+  const unitSel = document.createElement('select');
+  unitSel.style.cssText = 'flex:1;padding:11px 10px;min-height:44px;border:2px solid var(--border);border-radius:10px;font-size:15px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:\'Noto Sans JP\',sans-serif;cursor:pointer';
+  // Prefer the matched FOOD_DB entry's own declared defaultUnit (looked up
+  // fresh by foodId, not inferred from calorieBasis — a dish entry's
+  // calorieBasis can be an array of rates now) over a blind "g" fallback.
+  const dbEntryForUnit = f.foodId ? findFoodById(f.foodId) : null;
+  const matchedUnit = (dbEntryForUnit && dbEntryForUnit.defaultUnit)
+    || (f.calorieBasis && !Array.isArray(f.calorieBasis) && f.calorieBasis.unit)
+    || null;
+  const defaultUnit = f.unit || um[f.name] || matchedUnit || 'g';
+  UNITS.forEach(u => {
+    const opt = document.createElement('option');
+    opt.value = u; opt.textContent = u;
+    if (u === defaultUnit) opt.selected = true;
+    unitSel.appendChild(opt);
+  });
+  if (!f.unit) mealEventFoods[i].unit = defaultUnit;
+  qtyRow.appendChild(unitSel);
+  panel.appendChild(qtyRow);
+
+  // quick amount buttons (unit-aware)
+  const quickRow = document.createElement('div');
+  quickRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px';
+  function quickValues(unit) {
+    if (unit === '粒') return [5,10,20,30,50];
+    if (['個','枚','本','杯','切れ','皿','人前'].includes(unit)) return [1,2,3,4,5,6];
+    return [50,100,150,200,250,300];
+  }
+  function buildQuickButtons() {
+    quickRow.innerHTML = '';
+    const curUnit = mealEventFoods[i].unit || unitSel.value || 'g';
+    quickValues(curUnit).forEach(v => {
+      const qb = document.createElement('button');
+      qb.type = 'button';
+      qb.textContent = v;
+      qb.style.cssText = 'padding:8px 14px;min-height:40px;border-radius:10px;border:2px solid var(--border);background:var(--card);font-size:13px;font-weight:700;cursor:pointer;color:var(--text-sub);font-family:\'Noto Sans JP\',sans-serif';
+      qb.onclick = () => {
+        const unit = mealEventFoods[i].unit || unitSel.value || 'g';
+        mealEventFoods[i].amount  = v;
+        mealEventFoods[i].portion = null;
+        mealEventFoods[i].unit    = unit;
+        um[f.name] = unit; saveUnitMemory(um);
+        refreshStoredCalories(mealEventFoods[i]);
+        maybeEstimateFoodCalories(i);
+        renderMealEventChips();
+      };
+      quickRow.appendChild(qb);
+    });
+  }
+  buildQuickButtons();
+  panel.appendChild(quickRow);
+
+  // S / M / L — kept available but visually secondary, with touch targets
+  // well above the audit's flagged 26×24px (now full-width, ~44px tall).
+  const portionRow = document.createElement('div');
+  portionRow.style.cssText = 'display:flex;gap:6px;margin-bottom:12px';
+  const portionBg    = { s:'#d4f5e9', m:'#fef3d0', l:'#fde0e0' };
+  const portionColor = { s:'#2a9d6a', m:'#b8820a', l:'#c04040' };
+  const portionLabel = { s:'S 少なめ', m:'M 普通', l:'L 多め' };
+  const portionBtns = {};
+  ['s','m','l'].forEach(p => {
+    const pb = document.createElement('button');
+    pb.type = 'button';
+    pb.textContent = portionLabel[p];
+    pb.style.cssText = 'flex:1;min-height:44px;padding:8px 6px;border-radius:10px;border:2px solid var(--border);background:var(--card);font-family:\'Noto Sans JP\',sans-serif;font-size:12px;font-weight:700;cursor:pointer;color:var(--text-sub)';
+    pb.onclick = () => {
+      mealEventFoods[i].portion = p;
+      mealEventFoods[i].amount  = null;
+      mealEventFoods[i].unit    = null;
+      refreshStoredCalories(mealEventFoods[i]);
+      maybeEstimateFoodCalories(i);
+      renderMealEventChips();
+    };
+    portionBtns[p] = pb;
+    portionRow.appendChild(pb);
+  });
+  function updatePortionHighlight() {
+    const hasAmt = mealEventFoods[i].amount != null && mealEventFoods[i].amount !== '';
+    ['s','m','l'].forEach(p => {
+      const active = !hasAmt && mealEventFoods[i].portion === p;
+      portionBtns[p].style.background   = active ? portionBg[p] : 'var(--card)';
+      portionBtns[p].style.color        = active ? portionColor[p] : 'var(--text-sub)';
+      portionBtns[p].style.borderColor  = active ? 'transparent' : 'var(--border)';
+    });
+  }
+  updatePortionHighlight();
+  panel.appendChild(portionRow);
+
+  // ── カロリー ──────────────────────────────────────────────────────────
+  panel.appendChild(sectionLabel('カロリー'));
+  const calResult = document.createElement('div');
+  calResult.style.cssText = 'font-size:16px;margin-bottom:12px';
+  panel.appendChild(calResult);
+  function updateLiveResult() {
+    calResult.innerHTML = '';
+    const valueSpan = document.createElement('span');
+    valueSpan.style.fontSize = '16px';
+    applyCalorieSpanState(valueSpan, mealEventFoods[i]);
+    calResult.appendChild(valueSpan);
+  }
+  updateLiveResult();
+
+  // Amount typing: targeted update ONLY (updateLiveResult/updatePortionHighlight
+  // patch existing nodes) — never renderMealEventChips() here, or the field
+  // (and the iPhone keyboard) would be torn down and rebuilt every keystroke.
+  amountInput.oninput = () => {
+    const v = amountInput.value.trim();
+    mealEventFoods[i].amount  = v === '' ? null : Number(v);
+    mealEventFoods[i].unit    = mealEventFoods[i].unit || unitSel.value || 'g';
+    if (v !== '') mealEventFoods[i].portion = null;
+    refreshStoredCalories(mealEventFoods[i]);
+    maybeEstimateFoodCalories(i);
+    updateLiveResult();
+    updatePortionHighlight();
+  };
+
+  // A <select> commit is a discrete tap, not continuous typing — no cursor
+  // to preserve, so a full re-render here is safe and keeps the quick-amount
+  // buttons' unit-awareness simple.
+  unitSel.onchange = () => {
+    mealEventFoods[i].unit = unitSel.value;
+    um[f.name] = unitSel.value;
+    saveUnitMemory(um);
+    refreshStoredCalories(mealEventFoods[i]);
+    maybeEstimateFoodCalories(i);
+    renderMealEventChips();
+  };
+
+  // ── manual calorie override (secondary — collapsed unless already in
+  // use, so automatic estimation stays the normal path) ──────────────────
+  const calRow = document.createElement('div');
+  calRow.style.cssText = 'padding-top:10px;border-top:1px dashed var(--border)';
+
+  const isManual = f.calorieSource === 'manual';
+  const calExpanded = isManual || manualCalExpanded.has(f);
+
+  if (!calExpanded) {
+    const revealBtn = document.createElement('button');
+    revealBtn.type = 'button';
+    revealBtn.textContent = 'カロリーを手動で修正';
+    revealBtn.style.cssText = 'background:none;border:none;padding:6px 0;min-height:32px;font-size:12px;color:var(--text-muted);text-decoration:underline;cursor:pointer;font-family:\'Noto Sans JP\',sans-serif';
+    revealBtn.onclick = () => {
+      manualCalExpanded.add(mealEventFoods[i]);
+      renderMealEventChips();
+    };
+    calRow.appendChild(revealBtn);
+  } else {
+    const innerRow = document.createElement('div');
+    innerRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+
+    const calLabel = document.createElement('span');
+    calLabel.textContent = '手動カロリー:';
+    calLabel.style.cssText = 'font-size:12px;font-weight:700;color:var(--text-sub);flex-shrink:0';
+    innerRow.appendChild(calLabel);
+
+    const calInput = document.createElement('input');
+    calInput.type = 'number';
+    calInput.placeholder = 'kcal';
+    calInput.value = (isManual && f.calories != null) ? f.calories : '';
+    calInput.style.cssText = 'width:84px;padding:10px;min-height:40px;border:2px solid var(--border);border-radius:8px;font-size:14px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:\'Noto Sans JP\',sans-serif;box-sizing:border-box';
+    calInput.oninput = () => {
+      const v = calInput.value.trim();
+      if (v === '') return; // clearing is done via the button below, not by emptying this field
+      const n = Number(v);
+      if (!isFinite(n)) return;
+      cancelAiEstimate(mealEventFoods[i]);
+      mealEventFoods[i].calorieSource = 'manual';
+      mealEventFoods[i].calories = n;
+      mealEventFoods[i].isEstimated = false;
+      updateLiveResult(); // targeted — same reasoning as amountInput above
+    };
+    innerRow.appendChild(calInput);
+
+    const calUnitLabel = document.createElement('span');
+    calUnitLabel.textContent = 'kcal';
+    calUnitLabel.style.cssText = 'font-size:12px;color:var(--text-muted)';
+    innerRow.appendChild(calUnitLabel);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.style.cssText = 'margin-left:auto;padding:8px 12px;min-height:36px;border-radius:8px;border:2px solid var(--border);background:var(--card);font-size:12px;font-weight:700;cursor:pointer;color:var(--text-sub);font-family:\'Noto Sans JP\',sans-serif;white-space:nowrap';
+    if (isManual) {
+      toggleBtn.textContent = '自動推定に戻す';
+      toggleBtn.onclick = () => {
+        manualCalExpanded.delete(mealEventFoods[i]);
+        // Clear calorieBasis too, not just calorieSource/calories — a leftover
+        // AI/DB basis from before the manual override would otherwise still
+        // compute a number here, just mislabeled as "known" instead of "約"
+        // (or, worse, stale if the amount/unit changed while manual was set).
+        const wasEditorOpen = foodEditorOpen.has(mealEventFoods[i]);
+        mealEventFoods[i] = enrichFoodWithDbMatch({ ...mealEventFoods[i], foodId: null, calorieBasis: null, calorieSource: null, calories: null, isEstimated: false });
+        if (wasEditorOpen) foodEditorOpen.add(mealEventFoods[i]);
+        maybeEstimateFoodCalories(i);
+        renderMealEventChips();
+      };
+    } else {
+      toggleBtn.textContent = '閉じる';
+      toggleBtn.onclick = () => {
+        manualCalExpanded.delete(mealEventFoods[i]);
+        renderMealEventChips();
+      };
+    }
+    innerRow.appendChild(toggleBtn);
+    calRow.appendChild(innerRow);
+  }
+  panel.appendChild(calRow);
+
+  // ── 完了 ──────────────────────────────────────────────────────────────
+  const doneBtn = document.createElement('button');
+  doneBtn.type = 'button';
+  doneBtn.textContent = '完了';
+  doneBtn.style.cssText = 'width:100%;margin-top:12px;padding:12px;min-height:46px;border-radius:10px;border:none;background:var(--primary);color:white;font-family:\'Noto Sans JP\',sans-serif;font-size:15px;font-weight:700;cursor:pointer';
+  doneBtn.onclick = () => {
+    const typed = nameInput.value.trim();
+    const current = mealEventFoods[i];
+    if (typed && typed !== current.name) {
+      renameFoodInEditor(i, typed);
+      if (mealEventFoods[i].name === typed) {
+        foodEditorOpen.delete(mealEventFoods[i]);
+        renderMealEventChips();
+      }
+      // else: renameFoodInEditor() already blocked a duplicate name and
+      // showed a toast — leave the editor open so the user can see why.
+    } else {
+      foodEditorOpen.delete(current);
+      renderMealEventChips();
+    }
+  };
+  panel.appendChild(doneBtn);
+
+  return panel;
+}
+
 function renderMealEventChips() {
   const wrap = document.getElementById('mealEventChips');
   const hint = document.getElementById('mealEventChipHint');
@@ -3385,84 +3756,78 @@ function renderMealEventChips() {
   if (!mealEventFoods.length) { hint.style.display = 'inline'; renderMealEventTotal(); return; }
   hint.style.display = 'none';
 
-  const portionBg    = { s:'#d4f5e9', m:'#fef3d0', l:'#fde0e0' };
-  const portionColor = { s:'#2a9d6a', m:'#b8820a', l:'#c04040' };
   const um = loadUnitMemory();  // load once per render
 
   mealEventFoods.forEach((f, i) => {
-    const hasAmount = f.amount != null && f.amount !== '';
-
-    // ── outer wrapper (chip + optional expandable section) ─────────────────
     const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'width:100%;margin-bottom:5px';
+    wrapper.style.cssText = 'width:100%;margin-bottom:8px';
 
-    // ── main row ────────────────────────────────────────────────────────────
-    const chip = document.createElement('div');
-    chip.className = 'meal-food-chip';
-    chip.style.cssText = 'display:flex;align-items:center;gap:5px;padding:6px 8px 6px 12px;width:100%;border-radius:10px;flex-wrap:nowrap';
+    // ── compact card: tap anywhere on the info area to open the full
+    // correction/quantity editor below (Stage 2) — no more cramped inline
+    // text field, and a single large, obvious tap target instead of several
+    // small ones crowded into one row. ──────────────────────────────────
+    const card = document.createElement('div');
+    card.style.cssText = 'display:flex;align-items:stretch;width:100%;border-radius:12px;border:2px solid var(--border);background:var(--card);overflow:hidden';
 
-    // food name (editable — corrects both manual and AI-detected foods
-    // through the same field) + small AI badge for photo-detected items
-    const lbl = document.createElement('span');
-    lbl.style.cssText = 'font-weight:700;font-size:13px;flex:1;display:flex;align-items:center;gap:4px;min-width:0';
-    const lblText = document.createElement('input');
-    lblText.type = 'text';
-    lblText.value = f.name;
-    lblText.title = '食品名を編集';
-    lblText.style.cssText = 'flex:1;min-width:0;border:none;border-bottom:1px dashed transparent;background:transparent;font-weight:700;font-size:13px;color:var(--text);padding:0 1px;outline:none;font-family:\'Noto Sans JP\',sans-serif';
-    lblText.onfocus = () => { lblText.style.borderBottomColor = 'var(--accent)'; };
-    lblText.onblur = () => { lblText.style.borderBottomColor = 'transparent'; };
-    lblText.onchange = () => { renameFoodInEditor(i, lblText.value); };
-    lbl.appendChild(lblText);
+    const isOpen = foodEditorOpen.has(f);
+
+    const infoBtn = document.createElement('button');
+    infoBtn.type = 'button';
+    infoBtn.style.cssText = 'flex:1;min-width:0;text-align:left;padding:10px 12px;min-height:48px;border:none;background:' + (isOpen ? 'var(--bg)' : 'transparent') + ';cursor:pointer;font-family:\'Noto Sans JP\',sans-serif';
+    infoBtn.onclick = () => {
+      const opening = !foodEditorOpen.has(f);
+      if (opening) foodEditorOpen.add(f); else foodEditorOpen.delete(f);
+      renderMealEventChips();
+      if (opening) {
+        const panel = wrap.querySelector('[data-editor-index="' + i + '"]');
+        const nameField = panel && panel.querySelector('input[type="text"]');
+        if (nameField) nameField.focus();
+      }
+    };
+
+    const nameRow = document.createElement('div');
+    nameRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:700;font-size:14px;color:var(--text)';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = f.name;
+    nameSpan.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0';
+    nameRow.appendChild(nameSpan);
     if (f.origin === 'ai') {
       const aiBadge = document.createElement('span');
       aiBadge.textContent = 'AI';
       aiBadge.title = f.confidence ? ('AI確度: ' + f.confidence) : 'AIが検出';
       aiBadge.style.cssText = 'font-size:9px;font-weight:800;padding:1px 5px;border-radius:8px;background:var(--purple);color:white;flex-shrink:0;letter-spacing:0.3px';
-      lbl.appendChild(aiBadge);
+      nameRow.appendChild(aiBadge);
     }
-    chip.appendChild(lbl);
+    infoBtn.appendChild(nameRow);
 
-    // S / M / L buttons
-    ['s','m','l'].forEach(p => {
-      const pb = document.createElement('button');
-      const isActive = !hasAmount && f.portion === p;
-      pb.textContent = p.toUpperCase();
-      pb.style.cssText = 'width:26px;height:24px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg);font-family:Noto Sans JP,sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;color:var(--text-sub);flex-shrink:0;padding:0';
-      if (isActive) {
-        pb.style.background  = portionBg[p];
-        pb.style.color       = portionColor[p];
-        pb.style.borderColor = 'transparent';
-      }
-      pb.onclick = () => {
-        mealEventFoods[i].portion = p;
-        mealEventFoods[i].amount  = null;
-        mealEventFoods[i].unit    = null;
-        refreshStoredCalories(mealEventFoods[i]);
-        maybeEstimateFoodCalories(i);
-        // collapse amount section
-        const sec = wrapper.querySelector('.qty-section');
-        if (sec) sec.style.display = 'none';
-        renderMealEventChips();
-      };
-      chip.appendChild(pb);
-    });
+    const summaryRow = document.createElement('div');
+    summaryRow.style.cssText = 'display:flex;align-items:center;gap:7px;font-size:12px;margin-top:3px';
+    const hasAmount = f.amount != null && f.amount !== '';
+    const qtySpan = document.createElement('span');
+    if (hasAmount) {
+      qtySpan.textContent = f.amount + (f.unit || '');
+      qtySpan.style.cssText = 'padding:1px 7px;border-radius:10px;background:var(--bg);color:var(--text-sub);font-weight:700';
+    } else if (f.portion) {
+      qtySpan.textContent = { s:'少', m:'普', l:'多' }[f.portion];
+      qtySpan.style.cssText = 'padding:1px 7px;border-radius:10px;background:var(--bg);color:var(--text-sub);font-weight:700';
+    } else {
+      qtySpan.textContent = '量を設定';
+      qtySpan.style.cssText = 'color:var(--text-muted);font-style:italic';
+    }
+    summaryRow.appendChild(qtySpan);
+    const calSpan = document.createElement('span');
+    applyCalorieSpanState(calSpan, f);
+    summaryRow.appendChild(calSpan);
+    infoBtn.appendChild(summaryRow);
 
-    // 数量 toggle button
-    const qBtn = document.createElement('button');
-    qBtn.style.cssText = 'height:24px;padding:0 7px;border-radius:6px;border:1.5px solid var(--border);background:' + (hasAmount ? '#fef3d0' : 'var(--bg)') + ';font-family:Noto Sans JP,sans-serif;font-size:10px;font-weight:700;cursor:pointer;color:' + (hasAmount ? '#b8820a' : 'var(--text-sub)') + ';flex-shrink:0;white-space:nowrap';
-    qBtn.textContent = hasAmount ? (f.amount + (f.unit||'')) : '数量';
-    qBtn.onclick = () => {
-      const sec = wrapper.querySelector('.qty-section');
-      if (sec) sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
-    };
-    chip.appendChild(qBtn);
+    card.appendChild(infoBtn);
 
-    // remove button
+    // remove button — unchanged from before (not flagged by the audit)
     const rb = document.createElement('button');
     rb.className = 'meal-chip-remove';
     rb.innerHTML = '×';
-    rb.style.flexShrink = '0';
+    rb.title = '削除';
+    rb.style.cssText = 'flex-shrink:0;align-self:center;margin-right:10px';
     rb.onclick = () => {
       mealEventFoods.splice(i, 1);
       document.querySelectorAll('.meal-preset-tag').forEach(btn => {
@@ -3470,213 +3835,13 @@ function renderMealEventChips() {
       });
       renderMealEventChips();
     };
-    chip.appendChild(rb);
-    wrapper.appendChild(chip);
+    card.appendChild(rb);
 
-    // ── calorie subline (always visible, unobtrusive when unknown) ─────────
-    const calLine = document.createElement('div');
-    calLine.style.cssText = 'font-size:11px;padding:2px 4px 0 6px';
-    if (aiEstimatePending.has(f)) {
-      calLine.style.color = 'var(--purple)';
-      calLine.style.fontStyle = 'italic';
-      calLine.style.fontWeight = '600';
-      calLine.textContent = '推定中…';
-    } else {
-      const { text: calText, cls: calCls } = formatFoodCalorieDisplay(f);
-      calLine.textContent = calText;
-      if (calCls === 'unknown') {
-        calLine.style.color = 'var(--text-muted)';
-        calLine.style.fontStyle = 'italic';
-        calLine.style.fontWeight = '600';
-      } else if (calCls === 'ai') {
-        calLine.style.color = 'var(--purple)';
-        calLine.style.fontWeight = '700';
-      } else if (calCls === 'estimated') {
-        calLine.style.color = '#b8820a';
-        calLine.style.fontWeight = '700';
-      } else {
-        calLine.style.color = 'var(--text-sub)';
-        calLine.style.fontWeight = '700';
-      }
+    wrapper.appendChild(card);
+
+    if (isOpen) {
+      wrapper.appendChild(buildFoodEditorPanel(f, i, um));
     }
-    wrapper.appendChild(calLine);
-
-    // ── quantity section (hidden by default) ────────────────────────────────
-    const sec = document.createElement('div');
-    sec.className = 'qty-section';
-    sec.style.cssText = 'display:' + (hasAmount ? 'block' : 'none') + ';padding:8px 10px 10px 12px;background:var(--bg);border:1.5px solid var(--border);border-top:none;border-radius:0 0 10px 10px;margin-top:-4px';
-
-    // number input + unit select row
-    const inputRow = document.createElement('div');
-    inputRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:7px';
-
-    const numInput = document.createElement('input');
-    numInput.type = 'number';
-    numInput.placeholder = '数量';
-    numInput.value = f.amount != null ? f.amount : '';
-    numInput.style.cssText = 'width:80px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:14px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif';
-    numInput.oninput = () => {
-      const v = numInput.value.trim();
-      mealEventFoods[i].amount  = v === '' ? null : Number(v);
-      mealEventFoods[i].unit    = mealEventFoods[i].unit || unitSel.value || 'g';
-      // S/M/L を必ずクリア（数量があるとき）
-      if (v !== '') mealEventFoods[i].portion = null;
-      refreshStoredCalories(mealEventFoods[i]);
-      maybeEstimateFoodCalories(i);
-      renderMealEventChips();
-    };
-    inputRow.appendChild(numInput);
-
-    const unitSel = document.createElement('select');
-    unitSel.style.cssText = 'padding:5px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif;cursor:pointer';
-    // Prefer the matched FOOD_DB entry's own declared defaultUnit (looked up
-    // fresh by foodId, not inferred from calorieBasis — a dish entry's
-    // calorieBasis can be an array of rates now) over a blind "g" fallback —
-    // otherwise a count-based food like "ゆで卵" (per 1 個) would default the
-    // picker to grams, which unitsCompatible() would then correctly (but
-    // confusingly) treat as unknown.
-    const dbEntryForUnit = f.foodId ? findFoodById(f.foodId) : null;
-    const matchedUnit = (dbEntryForUnit && dbEntryForUnit.defaultUnit)
-      || (f.calorieBasis && !Array.isArray(f.calorieBasis) && f.calorieBasis.unit)
-      || null;
-    const defaultUnit = f.unit || um[f.name] || matchedUnit || 'g';
-    UNITS.forEach(u => {
-      const opt = document.createElement('option');
-      opt.value = u; opt.textContent = u;
-      if (u === defaultUnit) opt.selected = true;
-      unitSel.appendChild(opt);
-    });
-    if (!f.unit) {
-      mealEventFoods[i].unit = defaultUnit;
-    }
-    // quick amount buttons (unit-aware) — defined before onchange so it can be called inside
-    const quickRow = document.createElement('div');
-    quickRow.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap';
-
-    function quickValues(unit) {
-      if (unit === '粒')                                 return [5,10,20,30,50];
-      if (['個','枚','本','杯','切れ','皿','人前'].includes(unit)) return [1,2,3,4,5,6];
-      return [50,100,150,200,250,300]; // g / ml / default
-    }
-
-    function buildQuickButtons() {
-      quickRow.innerHTML = '';
-      const curUnit = mealEventFoods[i].unit || unitSel.value || 'g';
-      quickValues(curUnit).forEach(v => {
-        const qb = document.createElement('button');
-        qb.textContent = v;
-        qb.style.cssText = 'padding:4px 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--card);font-size:12px;font-weight:700;cursor:pointer;color:var(--text-sub);font-family:Noto Sans JP,sans-serif;transition:all 0.15s';
-        qb.onclick = () => {
-          const unit = mealEventFoods[i].unit || unitSel.value || 'g';
-          mealEventFoods[i].amount  = v;
-          mealEventFoods[i].portion = null;
-          mealEventFoods[i].unit    = unit;
-          um[f.name] = unit; saveUnitMemory(um);
-          refreshStoredCalories(mealEventFoods[i]);
-          maybeEstimateFoodCalories(i);
-          renderMealEventChips();
-        };
-        quickRow.appendChild(qb);
-      });
-    }
-
-    // single unified onchange: update state + memory + qBtn + quick buttons
-    unitSel.onchange = () => {
-      mealEventFoods[i].unit = unitSel.value;
-      um[f.name] = unitSel.value;
-      saveUnitMemory(um);
-      refreshStoredCalories(mealEventFoods[i]);
-      maybeEstimateFoodCalories(i);
-      // Re-render (like every other quantity-editing handler here) so the
-      // calorie subline and meal total reflect the new unit immediately —
-      // patching qBtn/quickRow in place left the displayed calorie and total
-      // stale until some other change happened to trigger a fuller re-render.
-      renderMealEventChips();
-    };
-
-    inputRow.appendChild(unitSel);
-    sec.appendChild(inputRow);
-
-    buildQuickButtons();
-    sec.appendChild(quickRow);
-
-    // ── manual calorie override (secondary — collapsed unless already in
-    // use, so automatic estimation stays the normal path) ──────────────────
-    const calRow = document.createElement('div');
-    calRow.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)';
-
-    const isManual = f.calorieSource === 'manual';
-    const calExpanded = isManual || manualCalExpanded.has(f);
-
-    if (!calExpanded) {
-      const revealBtn = document.createElement('button');
-      revealBtn.textContent = 'カロリーを手動で修正';
-      revealBtn.style.cssText = 'background:none;border:none;padding:0;font-size:11px;color:var(--text-muted);text-decoration:underline;cursor:pointer;font-family:Noto Sans JP,sans-serif';
-      revealBtn.onclick = () => {
-        manualCalExpanded.add(mealEventFoods[i]);
-        renderMealEventChips();
-      };
-      calRow.appendChild(revealBtn);
-    } else {
-      const innerRow = document.createElement('div');
-      innerRow.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap';
-
-      const calLabel = document.createElement('span');
-      calLabel.textContent = '手動カロリー:';
-      calLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text-sub);flex-shrink:0';
-      innerRow.appendChild(calLabel);
-
-      const calInput = document.createElement('input');
-      calInput.type = 'number';
-      calInput.placeholder = 'kcal';
-      calInput.value = (isManual && f.calories != null) ? f.calories : '';
-      calInput.style.cssText = 'width:70px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif';
-      calInput.oninput = () => {
-        const v = calInput.value.trim();
-        if (v === '') return; // clearing is done via the button below, not by emptying this field
-        const n = Number(v);
-        if (!isFinite(n)) return;
-        cancelAiEstimate(mealEventFoods[i]);
-        mealEventFoods[i].calorieSource = 'manual';
-        mealEventFoods[i].calories = n;
-        mealEventFoods[i].isEstimated = false;
-        renderMealEventChips();
-      };
-      innerRow.appendChild(calInput);
-
-      const calUnitLabel = document.createElement('span');
-      calUnitLabel.textContent = 'kcal';
-      calUnitLabel.style.cssText = 'font-size:11px;color:var(--text-muted)';
-      innerRow.appendChild(calUnitLabel);
-
-      const toggleBtn = document.createElement('button');
-      toggleBtn.style.cssText = 'margin-left:auto;padding:4px 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--card);font-size:11px;font-weight:700;cursor:pointer;color:var(--text-sub);font-family:Noto Sans JP,sans-serif;white-space:nowrap';
-      if (isManual) {
-        toggleBtn.textContent = '自動推定に戻す';
-        toggleBtn.onclick = () => {
-          manualCalExpanded.delete(mealEventFoods[i]);
-          // Clear calorieBasis too, not just calorieSource/calories — a leftover
-          // AI/DB basis from before the manual override would otherwise still
-          // compute a number here, just mislabeled as "known" instead of "約"
-          // (or, worse, stale if the amount/unit changed while manual was set).
-          mealEventFoods[i] = enrichFoodWithDbMatch({ ...mealEventFoods[i], foodId: null, calorieBasis: null, calorieSource: null, calories: null, isEstimated: false });
-          maybeEstimateFoodCalories(i);
-          renderMealEventChips();
-        };
-      } else {
-        toggleBtn.textContent = '閉じる';
-        toggleBtn.onclick = () => {
-          manualCalExpanded.delete(mealEventFoods[i]);
-          renderMealEventChips();
-        };
-      }
-      innerRow.appendChild(toggleBtn);
-
-      calRow.appendChild(innerRow);
-    }
-
-    sec.appendChild(calRow);
-    wrapper.appendChild(sec);
 
     wrap.appendChild(wrapper);
   });
