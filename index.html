@@ -1830,9 +1830,9 @@ const MEAL_PRESETS = [
   'ナッツ','フルーツ','アイスクリーム','その他'
 ];
 
-// ===================== FOOD DATABASE (Stage 0 foundations) =====================
-// Not wired into the meal UI yet. This is the structured data + pure helpers
-// that later stages (search, calories-in-UI, photo/AI) will build on.
+// ===================== FOOD DATABASE =====================
+// The structured data + pure helpers the meal UI, photo pipeline, and AI
+// calorie estimation are all built on (see calcCalories()/enrichFoodWithDbMatch()).
 //
 // Extended (all-optional) food-item shape these helpers understand, for
 // future reference — existing saved foods `{name, portion, amount, unit}`
@@ -1840,7 +1840,13 @@ const MEAL_PRESETS = [
 //   {
 //     name, amount, unit, portion,        // unchanged existing fields
 //     foodId,                             // optional FOOD_DB id link
-//     calorieBasis: { kcal, per, unit },  // "kcal per `per` `unit`"
+//     calorieBasis,                       // { kcal, per, unit } — "kcal per `per` `unit`" —
+//                                          // OR an array of those, for a dish that's
+//                                          // naturally measured multiple ways (e.g. a
+//                                          // per-serving AND a per-100g rate); calcCalories()
+//                                          // picks whichever entry matches the food's
+//                                          // current unit. AI portion (S/M/L) estimates use
+//                                          // a third shape, { kcal, portion } — see calcCalories().
 //     calories,                           // derived or manually overridden
 //     calorieSource: 'db'|'ai'|'manual'|'unknown',
 //     isEstimated                         // true => display with "≈"
@@ -1882,36 +1888,83 @@ const FOOD_DB = [
     defaultUnit: 'g', calorieBasis: { kcal: 210, per: 100, unit: 'g' }, approximate: true },
 
   // ---- dishes ----
+  // These 11 dish entries (plus 野菜炒め below, under vegetables) each carry
+  // TWO calorieBasis rates: the traditional per-serving one, and a per-100g
+  // one. calcCalories() picks whichever matches the food's current unit — so
+  // a manually-entered "1皿" and a photo-detected "180g" both resolve locally
+  // instead of the gram-based photo case always missing FOOD_DB and falling
+  // through to a network AI estimate (see the Stage 1 audit's "B2" finding).
+  // The per-100g figures are deliberately round, conservative estimates
+  // cross-checked against the existing per-serving numbers and typical
+  // serving weights — both rates stay `approximate: true`, so both still
+  // display with "≈", never as if they were an exact measurement.
   { id: 'pork_ginger', name: '豚の生姜焼き', category: 'dish',
     keywords: ['pork ginger', 'ginger pork', '生姜焼き', 'しょうが焼き'],
-    defaultUnit: '皿', calorieBasis: { kcal: 380, per: 1, unit: '皿' }, approximate: true },
+    defaultUnit: '皿',
+    calorieBasis: [{ kcal: 380, per: 1, unit: '皿' }, { kcal: 220, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'pork_shabu', name: '豚しゃぶ', category: 'dish',
     keywords: ['pork shabu-shabu', 'shabu shabu', 'しゃぶしゃぶ'],
-    defaultUnit: '皿', calorieBasis: { kcal: 320, per: 1, unit: '皿' }, approximate: true },
+    defaultUnit: '皿',
+    calorieBasis: [{ kcal: 320, per: 1, unit: '皿' }, { kcal: 150, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'tonkatsu', name: 'とんかつ', category: 'dish',
     keywords: ['tonkatsu', 'pork cutlet', 'カツ'],
-    defaultUnit: '枚', calorieBasis: { kcal: 450, per: 1, unit: '枚' }, approximate: true },
+    defaultUnit: '枚',
+    calorieBasis: [{ kcal: 450, per: 1, unit: '枚' }, { kcal: 300, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'curry_rice', name: 'カレーライス', category: 'dish',
     keywords: ['curry rice', 'curry', 'カレー'],
-    defaultUnit: '皿', calorieBasis: { kcal: 760, per: 1, unit: '皿' }, approximate: true },
+    defaultUnit: '皿',
+    calorieBasis: [{ kcal: 760, per: 1, unit: '皿' }, { kcal: 160, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'gyudon', name: '牛丼', category: 'dish',
     keywords: ['gyudon', 'beef bowl', '牛肉丼'],
-    defaultUnit: '杯', calorieBasis: { kcal: 733, per: 1, unit: '杯' }, approximate: true },
+    defaultUnit: '杯',
+    calorieBasis: [{ kcal: 733, per: 1, unit: '杯' }, { kcal: 160, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'ramen', name: 'ラーメン', category: 'dish',
     keywords: ['ramen', 'らーめん', '中華そば'],
-    defaultUnit: '杯', calorieBasis: { kcal: 500, per: 1, unit: '杯' }, approximate: true },
+    defaultUnit: '杯',
+    calorieBasis: [{ kcal: 500, per: 1, unit: '杯' }, { kcal: 65, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'soba', name: 'そば', category: 'dish',
     keywords: ['soba', '蕎麦', 'buckwheat noodles'],
-    defaultUnit: '杯', calorieBasis: { kcal: 330, per: 1, unit: '杯' }, approximate: true },
+    defaultUnit: '杯',
+    calorieBasis: [{ kcal: 330, per: 1, unit: '杯' }, { kcal: 55, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'udon', name: 'うどん', category: 'dish',
     keywords: ['udon'],
-    defaultUnit: '杯', calorieBasis: { kcal: 350, per: 1, unit: '杯' }, approximate: true },
+    defaultUnit: '杯',
+    calorieBasis: [{ kcal: 350, per: 1, unit: '杯' }, { kcal: 55, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'sushi', name: '寿司', category: 'dish',
     keywords: ['sushi', 'すし', 'nigiri'],
-    defaultUnit: '人前', calorieBasis: { kcal: 500, per: 1, unit: '人前' }, approximate: true },
+    defaultUnit: '人前',
+    calorieBasis: [{ kcal: 500, per: 1, unit: '人前' }, { kcal: 150, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'hamburger_steak', name: 'ハンバーグ', category: 'dish',
     keywords: ['hamburger steak', 'salisbury steak'],
-    defaultUnit: '個', calorieBasis: { kcal: 380, per: 1, unit: '個' }, approximate: true },
+    defaultUnit: '個',
+    calorieBasis: [{ kcal: 380, per: 1, unit: '個' }, { kcal: 240, per: 100, unit: 'g' }],
+    approximate: true },
+  { id: 'karaage', name: '唐揚げ', category: 'dish',
+    keywords: ['からあげ', 'karaage', 'fried chicken'],
+    defaultUnit: '個', calorieBasis: { kcal: 65, per: 1, unit: '個' }, approximate: true },
+  { id: 'miso_soup', name: '味噌汁', category: 'dish',
+    keywords: ['miso soup', 'おみそ汁'],
+    defaultUnit: '杯', calorieBasis: { kcal: 40, per: 1, unit: '杯' }, approximate: true },
+
+  // ---- fish & other protein (Stage 1 additions) ----
+  { id: 'natto', name: '納豆', category: 'protein',
+    keywords: ['natto'],
+    defaultUnit: 'g', calorieBasis: { kcal: 200, per: 100, unit: 'g' }, approximate: true },
+  { id: 'grilled_fish', name: '焼き魚', category: 'protein',
+    keywords: ['grilled fish', '焼魚'],
+    defaultUnit: '切れ', calorieBasis: { kcal: 180, per: 1, unit: '切れ' }, approximate: true },
+  { id: 'salmon', name: '鮭', category: 'protein',
+    keywords: ['salmon', 'サーモン', '焼き鮭', 'しゃけ'],
+    defaultUnit: '切れ', calorieBasis: { kcal: 160, per: 1, unit: '切れ' }, approximate: true },
 
   // ---- vegetables ----
   { id: 'salad_mixed', name: 'サラダ', category: 'vegetable',
@@ -1919,19 +1972,47 @@ const FOOD_DB = [
     defaultUnit: 'g', calorieBasis: { kcal: 20, per: 100, unit: 'g' }, approximate: true },
   { id: 'stir_fry_vegetable', name: '野菜炒め', category: 'vegetable',
     keywords: ['vegetable stir-fry', 'yasai itame'],
-    defaultUnit: '皿', calorieBasis: { kcal: 150, per: 1, unit: '皿' }, approximate: true },
+    defaultUnit: '皿',
+    calorieBasis: [{ kcal: 150, per: 1, unit: '皿' }, { kcal: 70, per: 100, unit: 'g' }],
+    approximate: true },
   { id: 'cabbage', name: 'キャベツ', category: 'vegetable',
     keywords: ['cabbage'],
     defaultUnit: 'g', calorieBasis: { kcal: 23, per: 100, unit: 'g' }, approximate: false },
   { id: 'tomato', name: 'トマト', category: 'vegetable',
     keywords: ['tomato'],
     defaultUnit: 'g', calorieBasis: { kcal: 19, per: 100, unit: 'g' }, approximate: false },
+  { id: 'mini_tomato', name: 'ミニトマト', category: 'vegetable',
+    keywords: ['プチトマト', 'チェリートマト', 'cherry tomato'],
+    defaultUnit: '個', calorieBasis: { kcal: 4, per: 1, unit: '個' }, approximate: false },
   { id: 'cucumber', name: 'きゅうり', category: 'vegetable',
     keywords: ['cucumber'],
     defaultUnit: 'g', calorieBasis: { kcal: 14, per: 100, unit: 'g' }, approximate: false },
   { id: 'broccoli', name: 'ブロッコリー', category: 'vegetable',
     keywords: ['broccoli'],
     defaultUnit: 'g', calorieBasis: { kcal: 33, per: 100, unit: 'g' }, approximate: false },
+  { id: 'lettuce', name: 'レタス', category: 'vegetable',
+    keywords: ['lettuce'],
+    defaultUnit: 'g', calorieBasis: { kcal: 12, per: 100, unit: 'g' }, approximate: false },
+  { id: 'green_pepper', name: 'ピーマン', category: 'vegetable',
+    keywords: ['green pepper', 'bell pepper'],
+    defaultUnit: 'g', calorieBasis: { kcal: 22, per: 100, unit: 'g' }, approximate: false },
+  { id: 'mashed_potato', name: 'マッシュポテト', category: 'vegetable',
+    keywords: ['mashed potato'],
+    defaultUnit: 'g', calorieBasis: { kcal: 110, per: 100, unit: 'g' }, approximate: true },
+
+  // ---- mushrooms ----
+  { id: 'mushroom_generic', name: 'きのこ', category: 'mushroom',
+    keywords: ['mushroom', 'マッシュルーム', 'きのこ類'],
+    defaultUnit: 'g', calorieBasis: { kcal: 20, per: 100, unit: 'g' }, approximate: true },
+  { id: 'eringi', name: 'エリンギ', category: 'mushroom',
+    keywords: ['king oyster mushroom', 'eringi'],
+    defaultUnit: 'g', calorieBasis: { kcal: 24, per: 100, unit: 'g' }, approximate: false },
+  { id: 'shiitake', name: 'しいたけ', category: 'mushroom',
+    keywords: ['椎茸', 'shiitake'],
+    defaultUnit: 'g', calorieBasis: { kcal: 18, per: 100, unit: 'g' }, approximate: false },
+  { id: 'enoki', name: 'えのき', category: 'mushroom',
+    keywords: ['えのきだけ', 'enoki'],
+    defaultUnit: 'g', calorieBasis: { kcal: 22, per: 100, unit: 'g' }, approximate: false },
 
   // ---- fruit ----
   { id: 'banana', name: 'バナナ', category: 'fruit',
@@ -2010,6 +2091,16 @@ function unitsCompatible(foodUnit, basisUnit) {
 // a different portion (or to an amount/unit) makes it fall through to the
 // rate branch below, which then correctly reports unknown until a fresh
 // estimate arrives (see maybeEstimateFoodCalories()).
+// Applies one { kcal, per, unit } rate to an amount. Shared by both the
+// single-rate and multi-rate (array) branches below.
+function applyCalorieRate(amount, rate) {
+  const amt = Number(amount);
+  const kcal = Number(rate.kcal);
+  const per = Number(rate.per);
+  if (!isFinite(amt) || !isFinite(kcal) || !isFinite(per) || per <= 0) return null;
+  return Math.round(kcal * (amt / per));
+}
+
 function calcCalories(food) {
   if (!food) return null;
   if (food.calorieSource === 'manual') {
@@ -2017,17 +2108,24 @@ function calcCalories(food) {
   }
   const basis = food.calorieBasis;
   if (!basis) return null;
+
+  // A dish naturally measured more than one way (e.g. "1皿" AND "180g") gets
+  // an array of rates instead of one — pick whichever rate matches the
+  // food's current unit. No fuzzy/partial matching: an amount in a unit none
+  // of the rates cover stays unknown, same as the single-rate case below.
+  if (Array.isArray(basis)) {
+    if (food.amount == null || food.amount === '') return null;
+    const rate = basis.find(b => unitsCompatible(food.unit, b.unit));
+    return rate ? applyCalorieRate(food.amount, rate) : null;
+  }
+
   if (basis.portion) {
     return (food.portion === basis.portion && typeof basis.kcal === 'number' && isFinite(basis.kcal))
       ? Math.round(basis.kcal) : null;
   }
   if (food.amount == null || food.amount === '') return null;
   if (!unitsCompatible(food.unit, basis.unit)) return null;
-  const amount = Number(food.amount);
-  const kcal = Number(basis.kcal);
-  const per = Number(basis.per);
-  if (!isFinite(amount) || !isFinite(kcal) || !isFinite(per) || per <= 0) return null;
-  return Math.round(kcal * (amount / per));
+  return applyCalorieRate(food.amount, basis);
 }
 
 // Sums calories across a meal's foods[]. Foods with unknown calories don't
@@ -3431,11 +3529,16 @@ function renderMealEventChips() {
 
     const unitSel = document.createElement('select');
     unitSel.style.cssText = 'padding:5px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif;cursor:pointer';
-    // Prefer the matched FOOD_DB entry's own unit (the one its calorieBasis is
-    // actually defined in) over a blind "g" fallback — otherwise a count-based
-    // food like "ゆで卵" (per 1 個) would default the picker to grams, which
-    // unitsCompatible() would then correctly (but confusingly) treat as unknown.
-    const matchedUnit = (f.calorieBasis && f.calorieBasis.unit) || null;
+    // Prefer the matched FOOD_DB entry's own declared defaultUnit (looked up
+    // fresh by foodId, not inferred from calorieBasis — a dish entry's
+    // calorieBasis can be an array of rates now) over a blind "g" fallback —
+    // otherwise a count-based food like "ゆで卵" (per 1 個) would default the
+    // picker to grams, which unitsCompatible() would then correctly (but
+    // confusingly) treat as unknown.
+    const dbEntryForUnit = f.foodId ? findFoodById(f.foodId) : null;
+    const matchedUnit = (dbEntryForUnit && dbEntryForUnit.defaultUnit)
+      || (f.calorieBasis && !Array.isArray(f.calorieBasis) && f.calorieBasis.unit)
+      || null;
     const defaultUnit = f.unit || um[f.name] || matchedUnit || 'g';
     UNITS.forEach(u => {
       const opt = document.createElement('option');
