@@ -1028,6 +1028,7 @@
     flex-shrink: 0;
   }
   .inline-food-cal.estimated, .meal-event-food-cal.estimated { color: #b8820a; }
+  .inline-food-cal.ai, .meal-event-food-cal.ai { color: var(--purple); }
   .inline-food-cal.unknown, .meal-event-food-cal.unknown { color: var(--text-muted); font-weight: 600; font-style: italic; }
 
   .inline-meal-note {
@@ -2001,13 +2002,26 @@ function unitsCompatible(foodUnit, basisUnit) {
 // Pure calorie calculation for a single food-item object. Understands the
 // optional calorie fields documented above; returns null (unknown) whenever
 // there isn't enough information to compute a number — never guesses.
+//
+// calorieBasis normally has the FOOD_DB shape { kcal, per, unit } (a rate).
+// An AI estimate for an S/M/L portion has no meaningful amount/unit to scale
+// by, so it instead uses a flat shape { kcal, portion } — valid ONLY while
+// food.portion still matches the portion it was estimated for; switching to
+// a different portion (or to an amount/unit) makes it fall through to the
+// rate branch below, which then correctly reports unknown until a fresh
+// estimate arrives (see maybeEstimateFoodCalories()).
 function calcCalories(food) {
   if (!food) return null;
   if (food.calorieSource === 'manual') {
     return (typeof food.calories === 'number' && isFinite(food.calories)) ? food.calories : null;
   }
   const basis = food.calorieBasis;
-  if (!basis || food.amount == null || food.amount === '') return null;
+  if (!basis) return null;
+  if (basis.portion) {
+    return (food.portion === basis.portion && typeof basis.kcal === 'number' && isFinite(basis.kcal))
+      ? Math.round(basis.kcal) : null;
+  }
+  if (food.amount == null || food.amount === '') return null;
   if (!unitsCompatible(food.unit, basis.unit)) return null;
   const amount = Number(food.amount);
   const kcal = Number(basis.kcal);
@@ -2018,13 +2032,17 @@ function calcCalories(food) {
 
 // Sums calories across a meal's foods[]. Foods with unknown calories don't
 // contribute to the numeric total but do mark the total as an estimate, so
-// the UI never presents a partial sum as if it were exact.
+// the UI never presents a partial sum as if it were exact. isComplete is
+// false whenever at least one food's calories are entirely uncalculated —
+// callers use this to distinguish "an approximate total" from "a total that
+// is missing data and must not be shown as if it were the full picture".
 function calcMealTotal(foods) {
   const list = Array.isArray(foods) ? foods : [];
-  if (!list.length) return { totalCalories: null, hasEstimate: false };
+  if (!list.length) return { totalCalories: null, hasEstimate: false, isComplete: true };
   let sum = 0;
   let anyKnown = false;
   let hasEstimate = false;
+  let isComplete = true;
   list.forEach(f => {
     const cal = calcCalories(f);
     if (cal != null) {
@@ -2033,18 +2051,22 @@ function calcMealTotal(foods) {
       if (f.isEstimated) hasEstimate = true;
     } else {
       hasEstimate = true;
+      isComplete = false;
     }
   });
-  return { totalCalories: anyKnown ? sum : null, hasEstimate };
+  return { totalCalories: anyKnown ? sum : null, hasEstimate, isComplete };
 }
 
 // Pure display formatting for a single saved food's calorie, built only on
 // top of calcCalories() — used by every read-only saved-meal view (Day-view
 // inline card, the meal modal's saved list, …) so they all agree with the
 // live editor and with each other. Never mutates the food or touches storage.
+// AI-sourced estimates get their own "約" prefix (vs. "≈" for a FOOD_DB
+// approximate match) so provenance is visible without technical jargon.
 function formatFoodCalorieDisplay(f) {
   const cal = calcCalories(f);
   if (cal == null) return { text: '— kcal', cls: 'unknown' };
+  if (f.calorieSource === 'ai') return { text: '約' + cal + ' kcal', cls: 'ai' };
   return { text: (f.isEstimated ? '≈' : '') + cal + ' kcal', cls: f.isEstimated ? 'estimated' : 'known' };
 }
 
@@ -2081,6 +2103,7 @@ function renameFoodInEditor(index, newName) {
   };
 
   mealEventFoods[index] = enrichFoodWithDbMatch(updated);
+  maybeEstimateFoodCalories(index);
   renderMealEventChips();
 }
 
@@ -2111,6 +2134,136 @@ function enrichFoodWithDbMatch(food) {
   };
   enriched.calories = calcCalories(enriched);
   return enriched;
+}
+
+// ===================== STAGE 3: AUTOMATIC AI CALORIE ESTIMATION =====================
+// Fallback for foods that don't safely match FOOD_DB. Never runs over a
+// manual override or an existing DB match — enrichFoodWithDbMatch() is
+// always tried first, everywhere; this only fills the remaining gap. Foods
+// stay valid and simply show "unknown" while a request is pending or if it
+// fails — calorie info is never fabricated, and 0 kcal is never stored for a
+// food that just hasn't been estimated yet.
+//
+// State here is intentionally kept OFF the food objects themselves (so it
+// never gets written to localStorage) and keyed by object identity, so a
+// response can be safely discarded once it's stale: the food was removed
+// from the meal, superseded by a newer request, or the user switched it to
+// manual/a DB match in the meantime.
+const aiEstimateTimers  = new WeakMap(); // food -> pending debounce timer id
+const aiEstimateGen     = new WeakMap(); // food -> request generation counter
+const aiEstimatePending = new WeakSet(); // food -> has an in-flight/queued request
+const AI_ESTIMATE_DEBOUNCE_MS = 700;
+
+// Manual calorie entry is an override, not the normal workflow, so its input
+// stays collapsed behind a "カロリーを手動で修正" link until asked for. Same
+// off-object, identity-keyed pattern as the AI state above — purely a UI
+// expand/collapse flag, never persisted.
+const manualCalExpanded = new WeakSet();
+
+function cancelAiEstimate(food) {
+  const t = aiEstimateTimers.get(food);
+  if (t) { clearTimeout(t); aiEstimateTimers.delete(food); }
+  aiEstimatePending.delete(food);
+}
+
+async function requestAiCalorieEstimate(payload) {
+  try {
+    const resp = await fetch('/api/estimate-calories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await resp.json().catch(() => null);
+    if (!resp.ok || !json || json.ok !== true) return null;
+    return json;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Decides whether the food at mealEventFoods[index] needs an automatic
+// calorie estimate, and if so, (re)schedules a debounced request for it.
+// Call this after any edit to a food's name/amount/unit/portion, right
+// alongside the existing enrichFoodWithDbMatch()/refreshStoredCalories()
+// calls — it's a no-op whenever DB/manual already has the answer.
+function maybeEstimateFoodCalories(index) {
+  const food = mealEventFoods[index];
+  if (!food) return;
+
+  if (food.calorieSource === 'manual') {
+    cancelAiEstimate(food);
+    return;
+  }
+
+  const hasQty = food.amount != null && food.amount !== '' && !!food.unit;
+  const hasPortion = !hasQty && !!food.portion;
+
+  if (!hasQty && !hasPortion) {
+    // Not enough info to estimate anything yet — drop any stale AI result.
+    cancelAiEstimate(food);
+    if (food.calorieSource === 'ai') {
+      food.calorieSource = null; food.calorieBasis = null; food.calories = null; food.isEstimated = false;
+    }
+    return;
+  }
+
+  // Self-heal: a real FOOD_DB match (food.foodId) is never cleared by the
+  // amount/unit/portion handlers, even though a portion-mode AI estimate may
+  // have since overwritten calorieBasis with a portion-shaped one. Re-apply
+  // the DB entry's own rate first — this instantly restores the free, exact
+  // DB answer once the food is back in amount/unit mode, instead of paying
+  // for a needless AI round-trip for a food that was already known.
+  if (food.foodId) {
+    const dbEntry = findFoodById(food.foodId);
+    if (dbEntry) {
+      food.calorieBasis = dbEntry.calorieBasis;
+      food.calorieSource = 'db';
+      food.isEstimated = !!dbEntry.approximate;
+      food.calories = calcCalories(food);
+    }
+  }
+
+  // Already have a real number for the current inputs (DB match that covers
+  // this mode, a manual value, or a still-applicable AI estimate)? Nothing
+  // to do — this is also what makes an AI amount/unit-basis estimate reusable
+  // across amount edits without refetching (see calcCalories()).
+  if (calcCalories(food) != null) { cancelAiEstimate(food); return; }
+
+  cancelAiEstimate(food);
+  const gen = (aiEstimateGen.get(food) || 0) + 1;
+  aiEstimateGen.set(food, gen);
+  aiEstimatePending.add(food);
+
+  const timer = setTimeout(async () => {
+    aiEstimateTimers.delete(food);
+    const payload = hasQty
+      ? { name: food.name, unit: food.unit }
+      : { name: food.name, portion: food.portion };
+    const result = await requestAiCalorieEstimate(payload);
+
+    // Discard a stale response rather than apply it.
+    if (aiEstimateGen.get(food) !== gen) return;
+    if (!mealEventFoods.includes(food)) return;
+    aiEstimatePending.delete(food);
+    // Something else already answered this while the request was in flight
+    // (switched to manual, or a DB self-heal resolved it) — don't clobber it.
+    if (food.calorieSource === 'manual' || calcCalories(food) != null) { renderMealEventChips(); return; }
+
+    if (result && result.ok && typeof result.kcal === 'number' && isFinite(result.kcal)) {
+      food.calorieBasis = (result.mode === 'flat')
+        ? { kcal: result.kcal, portion: food.portion }
+        : { kcal: result.kcal, per: result.per, unit: result.unit };
+      food.calorieSource = 'ai';
+      food.isEstimated = true;
+      food.calories = calcCalories(food);
+    } else {
+      // Estimation failed or came back "can't estimate" — leave unknown,
+      // never store 0 kcal for a food that just couldn't be estimated.
+      food.calorieSource = null; food.calorieBasis = null; food.calories = null; food.isEstimated = false;
+    }
+    renderMealEventChips();
+  }, AI_ESTIMATE_DEBOUNCE_MS);
+  aiEstimateTimers.set(food, timer);
 }
 
 // ===================== STAGE 2: SEARCH / SUGGESTIONS / STATS =====================
@@ -2233,6 +2386,7 @@ function addFoodByName(name) {
     showToast('すでに追加されています');
   } else {
     mealEventFoods.push(enrichFoodWithDbMatch({ name: trimmed, portion: '', amount: null, unit: null }));
+    maybeEstimateFoodCalories(mealEventFoods.length - 1);
     renderMealEventChips();
   }
   const input = document.getElementById('foodSearchInput');
@@ -2564,9 +2718,9 @@ function renderInlineMealFeed(rec) {
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="inline-meal-note">${escHtml(ev.note)}</div>` : '';
-    const { totalCalories, hasEstimate } = calcMealTotal(ev.foods || []);
+    const { totalCalories, hasEstimate, isComplete } = calcMealTotal(ev.foods || []);
     const calHtml = totalCalories != null
-      ? `<div style="font-size:11px;font-weight:700;color:var(--text-sub);margin-top:4px">食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal</div>`
+      ? `<div style="font-size:11px;font-weight:700;color:var(--text-sub);margin-top:4px">食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal${isComplete ? '' : '（一部未計算）'}</div>`
       : '';
     return `<div class="inline-meal-card">
       <div class="inline-meal-top">
@@ -2808,9 +2962,9 @@ function renderMealEventList() {
         }).join('') + '</div>';
     }
     const noteHtml = ev.note ? `<div class="meal-event-note">${escHtml(ev.note)}</div>` : '';
-    const { totalCalories, hasEstimate } = calcMealTotal(ev.foods || []);
+    const { totalCalories, hasEstimate, isComplete } = calcMealTotal(ev.foods || []);
     const calHtml = totalCalories != null
-      ? `<div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-top:6px">食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal</div>`
+      ? `<div style="font-size:12px;font-weight:700;color:var(--text-sub);margin-top:6px">食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal${isComplete ? '' : '（一部未計算）'}</div>`
       : '';
     return `<div class="meal-event-card">
       <div class="meal-event-card-header">
@@ -2959,6 +3113,7 @@ async function callAnalyzeMealApi(dataUrl, mealType) {
 function applyDetectedItems(items) {
   const list = Array.isArray(items) ? items : [];
   let added = 0;
+  const newIndices = [];
   list.forEach(item => {
     const name = item && typeof item.name === 'string' ? item.name.trim() : '';
     if (!name) return;
@@ -2974,9 +3129,19 @@ function applyDetectedItems(items) {
       confidence
     });
     mealEventFoods.push(food);
+    newIndices.push(mealEventFoods.length - 1);
     added++;
   });
-  if (added) renderMealEventChips();
+  if (added) {
+    // A photo-detected item that didn't safely match FOOD_DB already has a
+    // name+amount+unit from the vision model, so it can go straight to
+    // automatic calorie estimation too (requirement: photo path estimates
+    // calories the same way manual entry does). Estimate BEFORE the render so
+    // a food that's now pending shows "推定中…" on this first paint, instead
+    // of a misleadingly-plain "— kcal" for the ~1s until the next re-render.
+    newIndices.forEach(idx => maybeEstimateFoodCalories(idx));
+    renderMealEventChips();
+  }
   return added;
 }
 
@@ -3052,6 +3217,11 @@ function editMealEvent(id) {
     // untouched, so manual overrides are still preserved exactly.
     return enrichFoodWithDbMatch(base);
   });
+  // Fills in automatic estimates for legacy foods that have enough info
+  // (amount+unit or a portion) but predate this feature and were never
+  // estimated. A no-op for anything already resolved (db/manual/a still-
+  // valid ai estimate) — maybeEstimateFoodCalories() checks that itself.
+  mealEventFoods.forEach((f, idx) => maybeEstimateFoodCalories(idx));
   document.getElementById('mealEventType').value = ev.type || '';
   document.getElementById('mealEventTime').value = ev.time || '';
   document.getElementById('mealEventNote').value = ev.note || '';
@@ -3171,6 +3341,7 @@ function renderMealEventChips() {
         mealEventFoods[i].amount  = null;
         mealEventFoods[i].unit    = null;
         refreshStoredCalories(mealEventFoods[i]);
+        maybeEstimateFoodCalories(i);
         // collapse amount section
         const sec = wrapper.querySelector('.qty-section');
         if (sec) sec.style.display = 'none';
@@ -3207,15 +3378,28 @@ function renderMealEventChips() {
     // ── calorie subline (always visible, unobtrusive when unknown) ─────────
     const calLine = document.createElement('div');
     calLine.style.cssText = 'font-size:11px;padding:2px 4px 0 6px';
-    const calValue = calcCalories(f);
-    if (calValue != null) {
-      calLine.style.color = f.isEstimated ? '#b8820a' : 'var(--text-sub)';
-      calLine.style.fontWeight = '700';
-      calLine.textContent = (f.isEstimated ? '≈' : '') + calValue + ' kcal';
-    } else {
-      calLine.style.color = 'var(--text-muted)';
+    if (aiEstimatePending.has(f)) {
+      calLine.style.color = 'var(--purple)';
       calLine.style.fontStyle = 'italic';
-      calLine.textContent = '— kcal';
+      calLine.style.fontWeight = '600';
+      calLine.textContent = '推定中…';
+    } else {
+      const { text: calText, cls: calCls } = formatFoodCalorieDisplay(f);
+      calLine.textContent = calText;
+      if (calCls === 'unknown') {
+        calLine.style.color = 'var(--text-muted)';
+        calLine.style.fontStyle = 'italic';
+        calLine.style.fontWeight = '600';
+      } else if (calCls === 'ai') {
+        calLine.style.color = 'var(--purple)';
+        calLine.style.fontWeight = '700';
+      } else if (calCls === 'estimated') {
+        calLine.style.color = '#b8820a';
+        calLine.style.fontWeight = '700';
+      } else {
+        calLine.style.color = 'var(--text-sub)';
+        calLine.style.fontWeight = '700';
+      }
     }
     wrapper.appendChild(calLine);
 
@@ -3240,6 +3424,7 @@ function renderMealEventChips() {
       // S/M/L を必ずクリア（数量があるとき）
       if (v !== '') mealEventFoods[i].portion = null;
       refreshStoredCalories(mealEventFoods[i]);
+      maybeEstimateFoodCalories(i);
       renderMealEventChips();
     };
     inputRow.appendChild(numInput);
@@ -3285,6 +3470,7 @@ function renderMealEventChips() {
           mealEventFoods[i].unit    = unit;
           um[f.name] = unit; saveUnitMemory(um);
           refreshStoredCalories(mealEventFoods[i]);
+          maybeEstimateFoodCalories(i);
           renderMealEventChips();
         };
         quickRow.appendChild(qb);
@@ -3297,6 +3483,7 @@ function renderMealEventChips() {
       um[f.name] = unitSel.value;
       saveUnitMemory(um);
       refreshStoredCalories(mealEventFoods[i]);
+      maybeEstimateFoodCalories(i);
       // Re-render (like every other quantity-editing handler here) so the
       // calorie subline and meal total reflect the new unit immediately —
       // patching qBtn/quickRow in place left the displayed calorie and total
@@ -3310,46 +3497,79 @@ function renderMealEventChips() {
     buildQuickButtons();
     sec.appendChild(quickRow);
 
-    // ── manual calorie override ─────────────────────────────────────────────
+    // ── manual calorie override (secondary — collapsed unless already in
+    // use, so automatic estimation stays the normal path) ──────────────────
     const calRow = document.createElement('div');
-    calRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)';
+    calRow.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)';
 
-    const calLabel = document.createElement('span');
-    calLabel.textContent = 'カロリー:';
-    calLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text-sub);flex-shrink:0';
-    calRow.appendChild(calLabel);
+    const isManual = f.calorieSource === 'manual';
+    const calExpanded = isManual || manualCalExpanded.has(f);
 
-    const calInput = document.createElement('input');
-    calInput.type = 'number';
-    calInput.placeholder = 'kcal';
-    calInput.value = (f.calorieSource === 'manual' && f.calories != null) ? f.calories : '';
-    calInput.style.cssText = 'width:70px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif';
-    calInput.oninput = () => {
-      const v = calInput.value.trim();
-      if (v === '') return; // clearing is done via the button below, not by emptying this field
-      const n = Number(v);
-      if (!isFinite(n)) return;
-      mealEventFoods[i].calorieSource = 'manual';
-      mealEventFoods[i].calories = n;
-      mealEventFoods[i].isEstimated = false;
-      renderMealEventChips();
-    };
-    calRow.appendChild(calInput);
-
-    const calUnitLabel = document.createElement('span');
-    calUnitLabel.textContent = 'kcal（手動入力）';
-    calUnitLabel.style.cssText = 'font-size:11px;color:var(--text-muted)';
-    calRow.appendChild(calUnitLabel);
-
-    if (f.calorieSource === 'manual') {
-      const clearCalBtn = document.createElement('button');
-      clearCalBtn.textContent = '手動値をクリア';
-      clearCalBtn.style.cssText = 'margin-left:auto;padding:4px 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--card);font-size:11px;font-weight:700;cursor:pointer;color:var(--text-sub);font-family:Noto Sans JP,sans-serif;white-space:nowrap';
-      clearCalBtn.onclick = () => {
-        mealEventFoods[i] = enrichFoodWithDbMatch({ ...mealEventFoods[i], calorieSource: null, calories: null, isEstimated: false });
+    if (!calExpanded) {
+      const revealBtn = document.createElement('button');
+      revealBtn.textContent = 'カロリーを手動で修正';
+      revealBtn.style.cssText = 'background:none;border:none;padding:0;font-size:11px;color:var(--text-muted);text-decoration:underline;cursor:pointer;font-family:Noto Sans JP,sans-serif';
+      revealBtn.onclick = () => {
+        manualCalExpanded.add(mealEventFoods[i]);
         renderMealEventChips();
       };
-      calRow.appendChild(clearCalBtn);
+      calRow.appendChild(revealBtn);
+    } else {
+      const innerRow = document.createElement('div');
+      innerRow.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap';
+
+      const calLabel = document.createElement('span');
+      calLabel.textContent = '手動カロリー:';
+      calLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text-sub);flex-shrink:0';
+      innerRow.appendChild(calLabel);
+
+      const calInput = document.createElement('input');
+      calInput.type = 'number';
+      calInput.placeholder = 'kcal';
+      calInput.value = (isManual && f.calories != null) ? f.calories : '';
+      calInput.style.cssText = 'width:70px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--card);color:var(--text);outline:none;font-family:Noto Sans JP,sans-serif';
+      calInput.oninput = () => {
+        const v = calInput.value.trim();
+        if (v === '') return; // clearing is done via the button below, not by emptying this field
+        const n = Number(v);
+        if (!isFinite(n)) return;
+        cancelAiEstimate(mealEventFoods[i]);
+        mealEventFoods[i].calorieSource = 'manual';
+        mealEventFoods[i].calories = n;
+        mealEventFoods[i].isEstimated = false;
+        renderMealEventChips();
+      };
+      innerRow.appendChild(calInput);
+
+      const calUnitLabel = document.createElement('span');
+      calUnitLabel.textContent = 'kcal';
+      calUnitLabel.style.cssText = 'font-size:11px;color:var(--text-muted)';
+      innerRow.appendChild(calUnitLabel);
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.style.cssText = 'margin-left:auto;padding:4px 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--card);font-size:11px;font-weight:700;cursor:pointer;color:var(--text-sub);font-family:Noto Sans JP,sans-serif;white-space:nowrap';
+      if (isManual) {
+        toggleBtn.textContent = '自動推定に戻す';
+        toggleBtn.onclick = () => {
+          manualCalExpanded.delete(mealEventFoods[i]);
+          // Clear calorieBasis too, not just calorieSource/calories — a leftover
+          // AI/DB basis from before the manual override would otherwise still
+          // compute a number here, just mislabeled as "known" instead of "約"
+          // (or, worse, stale if the amount/unit changed while manual was set).
+          mealEventFoods[i] = enrichFoodWithDbMatch({ ...mealEventFoods[i], foodId: null, calorieBasis: null, calorieSource: null, calories: null, isEstimated: false });
+          maybeEstimateFoodCalories(i);
+          renderMealEventChips();
+        };
+      } else {
+        toggleBtn.textContent = '閉じる';
+        toggleBtn.onclick = () => {
+          manualCalExpanded.delete(mealEventFoods[i]);
+          renderMealEventChips();
+        };
+      }
+      innerRow.appendChild(toggleBtn);
+
+      calRow.appendChild(innerRow);
     }
 
     sec.appendChild(calRow);
@@ -3364,8 +3584,9 @@ function renderMealEventChips() {
 function renderMealEventTotal() {
   const el = document.getElementById('mealEventTotalCalories');
   if (!el) return;
-  const { totalCalories, hasEstimate } = calcMealTotal(mealEventFoods);
-  el.textContent = (totalCalories == null) ? '' : ('合計: ' + (hasEstimate ? '≈' : '') + totalCalories + ' kcal');
+  const { totalCalories, hasEstimate, isComplete } = calcMealTotal(mealEventFoods);
+  el.textContent = (totalCalories == null) ? '' :
+    ('合計: ' + (hasEstimate ? '≈' : '') + totalCalories + ' kcal' + (isComplete ? '' : '（一部未計算）'));
 }
 
 function saveMealEvent() {
@@ -3373,16 +3594,16 @@ function saveMealEvent() {
   const time  = document.getElementById('mealEventTime').value;
   const note  = document.getElementById('mealEventNote').value.trim();
   const foods = mealEventFoods.filter(f => f.name && f.name.trim());
-  const { totalCalories, hasEstimate } = calcMealTotal(foods);
+  const { totalCalories, hasEstimate, isComplete } = calcMealTotal(foods);
 
   const rec = getRecord(currentDate);
 
   if (editingMealEventId) {
     const idx = rec.mealEvents.findIndex(e => e.id === editingMealEventId);
-    if (idx !== -1) rec.mealEvents[idx] = { ...rec.mealEvents[idx], type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate };
+    if (idx !== -1) rec.mealEvents[idx] = { ...rec.mealEvents[idx], type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate, totalIsComplete: isComplete };
     showToast('食事を更新しました');
   } else {
-    rec.mealEvents.push({ id: uid(), type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate });
+    rec.mealEvents.push({ id: uid(), type, time, foods, note, totalCalories, totalHasEstimate: hasEstimate, totalIsComplete: isComplete });
     showToast('食事を保存しました');
   }
 
@@ -3923,14 +4144,16 @@ function buildDayText(dateStr) {
         let qty = '';
         if (f.amount != null && f.amount !== '') qty = ' ' + f.amount + (f.unit || '');
         else if (f.portion) qty = '(' + f.portion.toUpperCase() + ')';
-        const cal = calcCalories(f);
-        const calStr = cal != null ? ` — ${f.isEstimated ? '≈' : ''}${cal} kcal` : '';
+        const { text: calText } = formatFoodCalorieDisplay(f);
+        const calStr = calText === '— kcal' ? '' : ` — ${calText}`;
         return `・${f.name}${qty}${calStr}`;
       });
       const t = ev.time ? ` (${ev.time})` : '';
       const noteLine = ev.note ? `\n${ev.note}` : '';
-      const { totalCalories, hasEstimate } = calcMealTotal(foods);
-      const totalLine = totalCalories != null ? `\n食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal` : '';
+      const { totalCalories, hasEstimate, isComplete } = calcMealTotal(foods);
+      const totalLine = totalCalories != null
+        ? `\n食事合計: ${hasEstimate ? '≈' : ''}${totalCalories} kcal${isComplete ? '' : '（一部未計算）'}`
+        : '';
       const body = foodLines.length ? foodLines.join('\n') : '未記入';
       return `${ev.type || '食事'}${t}\n${body}${noteLine}${totalLine}`;
     });
@@ -3939,17 +4162,23 @@ function buildDayText(dateStr) {
     // Daily calorie total — recomputed fresh from foods each time, never
     // trusting a possibly-stale stored totalCalories. Omitted entirely (not
     // shown as 0) when no meal that day has any known calorie information.
+    // dayIsComplete is false whenever ANY meal has a food with no calorie
+    // info at all, so a day is never mistaken for a genuinely low-calorie day
+    // just because some foods weren't estimated (see calcMealTotal()).
     let dayTotal = 0;
     let dayHasKnown = false;
     let dayHasEstimate = false;
+    let dayIsComplete = true;
     r.mealEvents.forEach(ev => {
-      const { totalCalories, hasEstimate } = calcMealTotal((ev.foods || []).filter(f => f.name));
+      const { totalCalories, hasEstimate, isComplete } = calcMealTotal((ev.foods || []).filter(f => f.name));
       if (totalCalories != null) { dayTotal += totalCalories; dayHasKnown = true; }
       if (hasEstimate) dayHasEstimate = true;
+      if (!isComplete) dayIsComplete = false;
     });
     if (dayHasKnown) {
       const totalStr = Math.round(dayTotal).toLocaleString('ja-JP');
-      lines.push(`■1日の摂取カロリー\n推定合計: ${dayHasEstimate ? '≈' : ''}${totalStr} kcal\n`);
+      const caveatLine = dayIsComplete ? '' : '\n（一部の食品は未計算）';
+      lines.push(`■1日の摂取カロリー\n推定合計: ${dayHasEstimate ? '≈' : ''}${totalStr} kcal${caveatLine}\n`);
     }
   }
   const alcEvents = r.alcoholEvents || [];
